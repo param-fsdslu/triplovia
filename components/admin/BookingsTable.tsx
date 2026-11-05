@@ -19,7 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { format } from 'date-fns'
+import { formatBookingDate } from '@/lib/utils/booking-display'
 import { Eye, ChevronLeft, ChevronRight, Search, X } from '@/components/icons'
 import { updateBookingStatus } from '@/lib/actions/admin'
 import { ExportButtons } from './ExportButtons'
@@ -43,10 +43,10 @@ interface Booking {
     name: string
     city: string
     state: string
-  }
+  } | null
   room_type: {
     name: string
-  }
+  } | null
 }
 
 interface Pagination {
@@ -99,9 +99,9 @@ export function BookingsTable({ bookings, pagination, hotels = [] }: BookingsTab
     { header: 'Reference', accessor: 'booking_reference' },
     { header: 'Guest Name', accessor: (r: any) => `${r.guest_first_name} ${r.guest_last_name}` },
     { header: 'Email', accessor: 'guest_email' },
-    { header: 'Hotel', accessor: 'hotel.name' },
-    { header: 'Check-in', accessor: (r: any) => format(new Date(r.check_in_date), 'MMM dd, yyyy') },
-    { header: 'Check-out', accessor: (r: any) => format(new Date(r.check_out_date), 'MMM dd, yyyy') },
+    { header: 'Hotel', accessor: (r: Booking) => r.hotel?.name || 'Property unavailable' },
+    { header: 'Check-in', accessor: (r: Booking) => formatBookingDate(r.check_in_date) },
+    { header: 'Check-out', accessor: (r: Booking) => formatBookingDate(r.check_out_date) },
     { header: 'Amount (₹)', accessor: (r: any) => Math.round(r.total_amount).toLocaleString('en-IN') },
     { header: 'Status', accessor: 'booking_status' },
     { header: 'Payment', accessor: 'payment_status' },
@@ -307,17 +307,17 @@ export function BookingsTable({ bookings, pagination, hotels = [] }: BookingsTab
                   </TableCell>
                   <TableCell>
                     <div>
-                      <p className="font-medium">{booking.hotel.name}</p>
+                      <p className="font-medium">{booking.hotel?.name || 'Property unavailable'}</p>
                       <p className="text-xs text-muted-foreground">
-                        {booking.hotel.city}, {booking.hotel.state}
+                        {[booking.hotel?.city, booking.hotel?.state].filter(Boolean).join(', ') || 'Location unavailable'}
                       </p>
                     </div>
                   </TableCell>
                   <TableCell>
-                    {format(new Date(booking.check_in_date), 'MMM dd, yyyy')}
+                    {formatBookingDate(booking.check_in_date)}
                   </TableCell>
                   <TableCell>
-                    {format(new Date(booking.check_out_date), 'MMM dd, yyyy')}
+                    {formatBookingDate(booking.check_out_date)}
                   </TableCell>
                   <TableCell className="font-semibold">
                     ₹{Math.round(booking.total_amount).toLocaleString('en-IN')}

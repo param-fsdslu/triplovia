@@ -4,7 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button'
 import { User, Hotel as HotelIcon, Calendar, DollarSign, CreditCard, Mail, Phone, MapPin, Bed, Users, PawPrint, UtensilsCrossed, Building2, Download } from '@/components/icons'
 import { invoiceUrl, isInvoiceable } from '@/lib/utils/invoice'
-import { format } from 'date-fns'
+import { formatBookingDate } from '@/lib/utils/booking-display'
 import { redirect } from 'next/navigation'
 import { BookingStatusUpdater } from '@/components/admin/BookingStatusUpdater'
 import { RefundButton } from '@/components/admin/RefundButton'
@@ -144,7 +144,7 @@ export default async function AdminBookingDetailPage({
           <CardContent className="space-y-3">
             <div>
               <p className="text-sm text-muted-foreground">Hotel Name</p>
-              <p className="font-medium">{booking.hotel?.name}</p>
+              <p className="font-medium">{booking.hotel?.name || 'Property unavailable'}</p>
             </div>
             <div>
               <p className="text-sm text-muted-foreground">Address</p>
@@ -186,31 +186,31 @@ export default async function AdminBookingDetailPage({
               <div>
                 <p className="text-sm text-muted-foreground">Check-in</p>
                 <p className="font-medium">
-                  {format(new Date(booking.check_in_date), 'MMM dd, yyyy')}
+                  {formatBookingDate(booking.check_in_date)}
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  {format(new Date(booking.check_in_date), 'EEEE')}
+                  {formatBookingDate(booking.check_in_date, 'EEEE')}
                 </p>
               </div>
               <div>
                 <p className="text-sm text-muted-foreground">Check-out</p>
                 <p className="font-medium">
-                  {format(new Date(booking.check_out_date), 'MMM dd, yyyy')}
+                  {formatBookingDate(booking.check_out_date)}
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  {format(new Date(booking.check_out_date), 'EEEE')}
+                  {formatBookingDate(booking.check_out_date, 'EEEE')}
                 </p>
               </div>
             </div>
             <div>
               <p className="text-sm text-muted-foreground">Duration</p>
-              <p className="font-medium">{nights} {nights === 1 ? 'night' : 'nights'}</p>
+              <p className="font-medium">{Number.isFinite(nights) && nights > 0 ? `${nights} ${nights === 1 ? 'night' : 'nights'}` : '—'}</p>
             </div>
             <div className="pt-3 border-t">
               <p className="text-sm text-muted-foreground">Room Type</p>
               <div className="flex items-center gap-2 mt-1">
                 <Bed className="h-4 w-4 text-muted-foreground" />
-                <p className="font-medium">{booking.room_type?.name}</p>
+                <p className="font-medium">{booking.room_type?.name || 'Room type unavailable'}</p>
               </div>
               {booking.room_type?.description && (
                 <p className="text-sm text-muted-foreground mt-1">
@@ -420,13 +420,13 @@ export default async function AdminBookingDetailPage({
             <div>
               <p className="text-sm text-muted-foreground">Created At</p>
               <p className="text-sm">
-                {format(new Date(booking.created_at), 'MMM dd, yyyy HH:mm')}
+                {formatBookingDate(booking.created_at, 'MMM dd, yyyy HH:mm')}
               </p>
             </div>
             <div>
               <p className="text-sm text-muted-foreground">Updated At</p>
               <p className="text-sm">
-                {format(new Date(booking.updated_at), 'MMM dd, yyyy HH:mm')}
+                {formatBookingDate(booking.updated_at, 'MMM dd, yyyy HH:mm')}
               </p>
             </div>
             <div>

@@ -30,15 +30,14 @@ export function clientAuth(): Auth {
 }
 
 /** User-facing message for a Firebase client auth error */
-export function clientAuthErrorMessage(err: unknown): string {
+export function clientAuthErrorMessage(
+  err: unknown,
+  hostname = typeof window === 'undefined' ? '' : window.location.hostname
+): string {
   const code = typeof err === 'object' && err && 'code' in err ? String((err as { code: unknown }).code) : ''
   // The friendly messages below hide which Firebase error it was; keep that visible while developing
-  if (process.env.NODE_ENV !== 'production') {
+  if (process.env.NODE_ENV !== 'production' && typeof window !== 'undefined') {
     console.warn('[auth]', code || err)
-    // Firebase rejects SMS to real numbers from http://localhost (test numbers still work)
-    if (code === 'auth/invalid-app-credential' && location.hostname === 'localhost') {
-      console.warn('[auth] Real-number SMS fails on localhost: open http://127.0.0.1:3000 instead (127.0.0.1 must be a Firebase authorized domain) or use a test number')
-    }
   }
   switch (code) {
     case 'auth/popup-blocked':
@@ -58,6 +57,9 @@ export function clientAuthErrorMessage(err: unknown): string {
       return 'We can’t send more codes right now. Please try again later or use email.'
     case 'auth/captcha-check-failed':
     case 'auth/invalid-app-credential':
+      if (hostname === 'localhost') {
+        return 'Firebase cannot send SMS to real numbers on localhost. Use a Firebase test phone number here, or sign in by mobile on triplovia.com.'
+      }
       return 'Security check failed. Please refresh the page and try again.'
     case 'auth/operation-not-allowed':
     case 'auth/billing-not-enabled':

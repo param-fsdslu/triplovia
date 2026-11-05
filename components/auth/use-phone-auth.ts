@@ -36,8 +36,6 @@ export function usePhoneAuth() {
     const host = recaptchaHost.current
     if (!host) throw new Error('Phone verification is not ready. Please try again.')
     sending.current = true
-    deadline.current = Date.now() + RESEND_SECONDS * 1000
-    setResendIn(RESEND_SECONDS)
     try {
       const auth = clientAuth()
       try { verifier.current?.clear() } catch { /* A fresh widget replaces the previous one. */ }
@@ -56,6 +54,9 @@ export function usePhoneAuth() {
     } catch (error) {
       try { verifier.current?.clear() } catch { /* Ignore an already-cleared widget. */ }
       verifier.current = null
+      // No OTP was confirmed sent: let the user correct the problem and retry.
+      deadline.current = 0
+      if (mounted.current) setResendIn(0)
       throw error
     } finally { sending.current = false }
   }, [])
