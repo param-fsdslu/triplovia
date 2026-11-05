@@ -11,3 +11,11 @@
 
 [functions]
   directory = "netlify/functions"
+
+# Firebase sign-in helpers must stay on triplovia.com in the browser.
+# Upstream uses the Firebase project ID "triploviia" (two i's).
+[[redirects]]
+  from = "/__/auth/*"
+  to = "https://triploviia.firebaseapp.com/__/auth/:splat"
+  status = 200
+  force = true

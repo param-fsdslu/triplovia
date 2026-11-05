@@ -9,6 +9,10 @@ const intlMiddleware = createMiddleware(routing);
 
 export async function middleware(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
+  // Firebase's OAuth helpers are proxied by Netlify; never add a locale prefix.
+  if (pathname === '/__/auth' || pathname.startsWith('/__/auth/')) {
+    return NextResponse.next();
+  }
   const isAdmin = isAdminPath(pathname);
 
   // Block routes for disabled features (returns 404); admin pages match without their prefix
