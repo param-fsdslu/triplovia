@@ -8,6 +8,7 @@
     "build": "next build --turbopack",
     "start": "next start",
     "lint": "eslint",
+    "test:auth": "tsc -p lib/db/__tests__/tsconfig.json && node node_modules/.cache/db-tests/lib/db/__tests__/phone-proof.test.js",
     "test:email": "tsc -p lib/db/__tests__/tsconfig.json && node node_modules/.cache/db-tests/lib/db/__tests__/booking-email-delivery.test.js",
     "test:policy": "tsc -p lib/db/__tests__/tsconfig.json && node node_modules/.cache/db-tests/lib/db/__tests__/hotel-cancellation.test.js",
     "test:db": "tsc -p lib/db/__tests__/tsconfig.json && node node_modules/.cache/db-tests/lib/db/__tests__/db.test.js && node node_modules/.cache/db-tests/lib/db/__tests__/cached-store.test.js",

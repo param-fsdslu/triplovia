@@ -16,6 +16,8 @@ const bunnyCdnHost = (() => {
 })();
 
 const nextConfig: NextConfig = {
+  // Keep a running dev server separate from production builds and Netlify's .next output.
+  distDir: process.env.NODE_ENV === 'development' ? '.next-dev' : '.next',
   images: {
     remotePatterns: [
       {

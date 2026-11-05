@@ -17,12 +17,23 @@ export interface BunnyStorageConfig {
   cdnUrl: string
 }
 
-/** null until all storage settings are present (uploads then stay on Firebase Storage) */
+/** Firebase is used only when Bunny has not been configured at all. */
 export function bunnyStorageConfig(): BunnyStorageConfig | null {
   const zone = process.env.BUNNY_STORAGE_ZONE?.trim()
   const password = process.env.BUNNY_STORAGE_PASSWORD?.trim()
   const cdnUrl = process.env.BUNNY_CDN_URL?.trim().replace(/\/+$/, '')
-  if (!zone || !password || !cdnUrl) return null
+  if (!zone && !password && !cdnUrl) return null
+  if (!zone || !password || !cdnUrl) {
+    const missing = [
+      !zone && 'BUNNY_STORAGE_ZONE',
+      !password && 'BUNNY_STORAGE_PASSWORD',
+      !cdnUrl && 'BUNNY_CDN_URL',
+    ].filter(Boolean)
+    throw new Error(
+      `Image storage is not fully configured. Set ${missing.join(', ')} in the server environment ` +
+      '(Netlify: include Functions scope), then redeploy.'
+    )
+  }
 
   const region = (process.env.BUNNY_STORAGE_REGION ?? '').trim().toLowerCase()
   const host = !region || region === 'de' ? 'storage.bunnycdn.com' : `${region}.storage.bunnycdn.com`

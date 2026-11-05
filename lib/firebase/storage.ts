@@ -54,10 +54,17 @@ async function toBuffer(body: UploadBody): Promise<Buffer> {
   return Buffer.from(await (body as Blob).arrayBuffer())
 }
 
-function storageError(err: unknown): StorageError {
+function storageError(err: unknown, uploading = false): StorageError {
   const code = (err as any)?.code
   if (code === 412) return { message: 'The resource already exists', statusCode: '409' }
-  if (code === 404) return { message: 'Object not found', statusCode: '404' }
+  if (Number(code) === 404) {
+    return {
+      message: uploading
+        ? 'The configured Firebase Storage bucket does not exist. Configure Bunny Storage in the server environment (Netlify: include Functions scope) and redeploy, or provision the Firebase bucket.'
+        : 'Object not found',
+      statusCode: '404',
+    }
+  }
   return { message: err instanceof Error ? err.message : 'Storage error', statusCode: String(code ?? 500) }
 }
 
@@ -98,7 +105,7 @@ function bucketApi(bucket: string) {
           })
         return { data: { id: name, path, fullPath: name }, error: null }
       } catch (err) {
-        return { data: null, error: storageError(err) }
+        return { data: null, error: storageError(err, true) }
       }
     },
 

@@ -26,6 +26,7 @@ import { EmailLoginStep, EmailSignupStep } from './EmailAuthSteps'
 import { GoogleIcon } from './GoogleIcon'
 import { PhoneNumberInput } from './PhoneNumberInput'
 import { usePhoneAuth } from './use-phone-auth'
+import { ResendOtpButton } from './ResendOtpButton'
 
 type SignedIn = Extract<ProviderSignInResult, { success: true }>
 type Step = 'start' | 'otp' | 'email-login' | 'email-signup' | 'complete'
@@ -78,6 +79,7 @@ export function AuthPanel({ intent = 'login', notice, onSignedIn, onSessionStart
   const [error, setError] = useState<string | null>(null)
   const [completion, setCompletion] = useState<SignedIn | null>(null)
   const done = useRef(false)
+  const verifying = useRef(false)
 
   const go = (next: Step) => {
     setError(null)
@@ -105,7 +107,7 @@ export function AuthPanel({ intent = 'login', notice, onSignedIn, onSessionStart
   async function sendCode(e?: FormEvent) {
     e?.preventDefault()
     const target = phone.sentTo && step === 'otp' ? phone.sentTo : phoneValue
-    if (!target) return
+    if (!target || busy || phone.resendIn > 0) return
     setBusy('phone')
     setError(null)
     try {
@@ -120,7 +122,8 @@ export function AuthPanel({ intent = 'login', notice, onSignedIn, onSessionStart
   }
 
   async function verify(value: string) {
-    if (value.length !== 6 || busy) return
+    if (value.length !== 6 || busy || verifying.current) return
+    verifying.current = true
     setBusy('otp')
     setError(null)
     try {
@@ -129,6 +132,7 @@ export function AuthPanel({ intent = 'login', notice, onSignedIn, onSessionStart
       setError(clientAuthErrorMessage(err))
       setCode('')
     } finally {
+      verifying.current = false
       if (!done.current) setBusy(null)
     }
   }
@@ -160,9 +164,10 @@ export function AuthPanel({ intent = 'login', notice, onSignedIn, onSessionStart
     content = (
       <EmailLoginStep
         onBack={() => go('start')}
-        onSignedIn={() => {
+        onSignedIn={(result) => {
           onSessionStarted?.()
-          onSignedIn()
+          if (result.missing.length) { setCompletion(result); go('complete') }
+          else onSignedIn()
         }}
         onCreateAccount={() => go('email-signup')}
         onNavigateAway={onNavigateAway}
@@ -223,21 +228,7 @@ export function AuthPanel({ intent = 'login', notice, onSignedIn, onSessionStart
           Verify & continue
         </PillButton>
 
-        <p className="text-center text-sm text-muted-foreground">
-          Didn&apos;t get the code?{' '}
-          {phone.resendIn > 0 ? (
-            <span className="tabular-nums">Resend in {phone.resendIn}s</span>
-          ) : (
-            <button
-              type="button"
-              onClick={() => sendCode()}
-              disabled={busy !== null}
-              className="font-semibold text-primary underline-offset-4 hover:underline disabled:opacity-50"
-            >
-              Resend code
-            </button>
-          )}
-        </p>
+        <ResendOtpButton resendIn={phone.resendIn} busy={busy !== null} onResend={() => sendCode()} />
       </form>
     )
   } else {
@@ -262,8 +253,8 @@ export function AuthPanel({ intent = 'login', notice, onSignedIn, onSessionStart
 
         <FormError message={error} />
 
-        <PillButton type="submit" disabled={!phoneValue || busy !== null} busy={busy === 'phone'}>
-          Continue
+        <PillButton type="submit" disabled={!phoneValue || busy !== null || phone.resendIn > 0} busy={busy === 'phone'}>
+          {phone.resendIn > 0 ? `Send OTP in ${phone.resendIn}s` : 'Continue'}
         </PillButton>
 
         <FieldSeparator className="my-1 text-xs font-medium *:data-[slot=field-separator-content]:bg-card">

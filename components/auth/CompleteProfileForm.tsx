@@ -9,7 +9,7 @@ import { useState, type FormEvent } from 'react'
 import { Input } from '@/components/ui/input'
 import { completeProfile, type ProviderSignInResult } from '@/lib/actions/auth'
 import { authInputClass, FieldLabelText, FormError, PillButton, StepHeader } from './auth-ui'
-import { PhoneNumberInput } from './PhoneNumberInput'
+import { VerifiedPhoneInput } from './VerifiedPhoneInput'
 
 type SignedIn = Extract<ProviderSignInResult, { success: true }>
 
@@ -20,7 +20,7 @@ interface CompleteProfileFormProps {
 
 export function CompleteProfileForm({ result, onDone }: CompleteProfileFormProps) {
   const { missing, optional, profile } = result
-  const [phone, setPhone] = useState<string | null>(null)
+  const [phoneProof, setPhoneProof] = useState<{ phone: string; idToken: string } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -34,7 +34,8 @@ export function CompleteProfileForm({ result, onDone }: CompleteProfileFormProps
         firstName: (form.get('firstName') as string) ?? undefined,
         lastName: (form.get('lastName') as string) ?? undefined,
         email: (form.get('email') as string) ?? undefined,
-        phone: phone ?? undefined,
+        phone: phoneProof?.phone,
+        phoneIdToken: phoneProof?.idToken,
       })
       if (!res.success) {
         setError(res.error)
@@ -105,14 +106,14 @@ export function CompleteProfileForm({ result, onDone }: CompleteProfileFormProps
       {missing.includes('phone') && (
         <div>
           <FieldLabelText htmlFor="cp-phone">Mobile number</FieldLabelText>
-          <PhoneNumberInput id="cp-phone" onValueChange={setPhone} required autoFocus={!missing.includes('name')} />
-          <p className="mt-1.5 text-xs text-muted-foreground">So the property can reach you about your stay.</p>
+          <VerifiedPhoneInput id="cp-phone" defaultValue={profile.phone || undefined} onVerified={setPhoneProof} />
+          <p className="mt-1.5 text-xs text-muted-foreground">Verify this number to recover guest bookings and let the property contact you.</p>
         </div>
       )}
 
       <FormError message={error} />
 
-      <PillButton type="submit" busy={busy} className="mt-1">
+      <PillButton type="submit" busy={busy} disabled={missing.includes('phone') && !phoneProof} className="mt-1">
         Continue
       </PillButton>
     </form>

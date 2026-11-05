@@ -44,6 +44,8 @@ import { serverLog } from '@/lib/utils/server-log'
 import { logActivity } from '@/lib/services/activity-log.service'
 import { accountLabel } from '@/lib/utils/account-label'
 
+import { phoneFromProof, verifiedProfilePhone } from '@/lib/firebase/auth/phone-proof'
+
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 /**
@@ -55,7 +57,7 @@ const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 export async function signIn(
   prevState: { error?: string; success?: boolean; redirectTo?: string } | null,
   formData: FormData
-) {
+): Promise<ProviderSignInResult> {
   const email = formData.get('email') as string
   const password = formData.get('password') as string
   const redirectTo = formData.get('redirect') as string
@@ -77,7 +79,8 @@ export async function signIn(
   revalidatePath('/', 'layout')
 
   // Return success with redirect URL for client-side navigation
-  return { success: true, redirectTo: safeRedirectPath(redirectTo) }
+  await claimGuestRecords(user.id, verifiedProfilePhone(user.user_metadata))
+  return { success: true, redirectTo: safeRedirectPath(redirectTo), ...profileOf(user) }
 }
 
 /**
@@ -138,6 +141,15 @@ export async function signUp(
     return { error: 'Passwords do not match' }
   }
 
+  let verifiedPhone: string
+  try {
+    const token = formData.get('phoneIdToken')
+    if (typeof token !== 'string' || !token) return { error: 'Please verify your mobile number with the SMS code.' }
+    verifiedPhone = phoneFromProof(await adminAuth().verifyIdToken(token, true), phone)
+  } catch {
+    return { error: 'Mobile verification expired or failed. Please request a new SMS code.' }
+  }
+
   // Don't reveal whether an address is registered: an existing account gets the same response
   if (await getAuthUserByEmail(email)) {
     return { success: true }
@@ -150,7 +162,9 @@ export async function signUp(
       first_name: firstName,
       last_name: lastName,
       full_name: `${firstName} ${lastName}`,
-      phone,
+      phone: verifiedPhone,
+      verified_phone: verifiedPhone,
+      phone_verified_at: new Date().toISOString(),
     },
   })
 
@@ -186,6 +200,7 @@ export type ProfileField = 'name' | 'email' | 'phone'
 export type ProviderSignInResult =
   | {
       success: true
+      error?: never
       redirectTo: string
       /** Required details the provider didn't supply; the client asks for them before continuing */
       missing: ProfileField[]
@@ -205,7 +220,7 @@ function profileOf(user: AuthUser) {
   }
   const missing: ProfileField[] = []
   if (!profile.firstName) missing.push('name')
-  if (!profile.phone) missing.push('phone')
+  if (!verifiedProfilePhone(meta)) missing.push('phone')
   const optional: ProfileField[] = profile.email ? [] : ['email']
   return { profile, missing, optional }
 }
@@ -254,6 +269,7 @@ export async function completeProfile(input: {
   lastName?: string
   email?: string
   phone?: string
+  phoneIdToken?: string
 }): Promise<{ success: true } | { success?: false; error: string }> {
   const user = await getSessionUser()
   if (!user) return { error: 'Your session has expired. Please sign in again.' }
@@ -275,12 +291,24 @@ export async function completeProfile(input: {
     return { error: 'Please enter a valid mobile number' }
   }
 
-  await fillMissingUserDetails(user.id, {
+  let verifiedPhone: string | undefined
+  if (missing.includes('phone')) {
+    try {
+      if (!input.phoneIdToken || !phone) return { error: 'Please verify your mobile number with the SMS code.' }
+      verifiedPhone = phoneFromProof(await adminAuth().verifyIdToken(input.phoneIdToken, true), phone)
+    } catch {
+      return { error: 'Mobile verification expired or failed. Please request a new SMS code.' }
+    }
+  }
+
+  const updated = await fillMissingUserDetails(user.id, {
     firstName: firstName || undefined,
     lastName: lastName || undefined,
     email: email || undefined,
-    phone: phone ?? undefined,
+    verifiedPhone,
   })
+  if (!updated) return { error: 'Could not save your profile. Please try again.' }
+  await claimGuestRecords(user.id, verifiedPhone ?? verifiedProfilePhone(updated.user_metadata))
   revalidatePath('/', 'layout')
   return { success: true }
 }

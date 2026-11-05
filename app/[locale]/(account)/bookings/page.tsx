@@ -1,3 +1,5 @@
+import { GuestBookingRecovery } from '@/components/account/GuestBookingRecovery'
+import { verifiedProfilePhone } from '@/lib/firebase/auth/phone-proof'
 import { createClient } from '@/lib/db/server'
 import { redirect } from 'next/navigation'
 import { Link } from '@/i18n/routing'
@@ -40,6 +42,7 @@ export default async function MyBookingsPage() {
       </div>
 
       {/* ── Rooms picked but not paid for (saved on the account) ── */}
+      {!verifiedProfilePhone(user.user_metadata ?? {}) && <GuestBookingRecovery phone={user.user_metadata?.phone} firstName={user.user_metadata?.first_name ?? undefined} lastName={user.user_metadata?.last_name ?? undefined} />}
       <SavedStaysList stays={savedStays} />
 
       {bookings.length === 0 ? (

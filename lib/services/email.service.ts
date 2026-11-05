@@ -225,6 +225,53 @@ export function vendorBookingConfirmedEmail(s: BookingSummary, bookingId: string
   }
 }
 
+export interface CancellationEmailDetails {
+  userName: string
+  bookingId: string
+  hotelName: string
+  checkInDate: string
+  checkOutDate: string
+  refundAmount?: number
+  reason?: string
+}
+
+/** Cancellation and refund updates share the confirmation email's logo and clean layout. */
+export function bookingCancellationEmail(params: CancellationEmailDetails, status: 'cancelled' | 'review' | 'declined' = 'cancelled') {
+  const reviewing = status === 'review'
+  const declined = status === 'declined'
+  const title = declined ? 'Refund Request Update' : 'Booking Cancelled'
+  const subtitle = reviewing ? 'Your refund request is under review' : declined ? 'An update on your refund request' : 'Your cancellation is confirmed'
+  const hasRefund = params.refundAmount !== undefined
+  const manageUrl = BRAND.appUrl + '/en/bookings/' + encodeURIComponent(params.bookingId)
+  return {
+    subject: title + ': ' + params.hotelName + ' (' + params.bookingId + ')',
+    html: emailShell(title, subtitle, `
+      <p>Hi ${escapeHtml(params.userName)},</p>
+      <p>${declined ? 'We have reviewed your refund request and are unable to approve it at this time.' : reviewing ? 'Your booking has been cancelled. We have received your refund request and will email you when the review is complete.' : 'Your booking has been cancelled. The details are below for your records.'}</p>
+      <div class="booking-details">
+        <h2 style="margin: 0 0 12px; color: ${BRAND.primary}; font-size: 16px;">${escapeHtml(params.hotelName)}</h2>
+        ${detailRow('Booking ID', '<strong>' + escapeHtml(params.bookingId) + '</strong>')}
+        ${detailRow('Guest name', escapeHtml(params.userName))}
+        ${detailRow('Original check-in', formatDate(params.checkInDate))}
+        ${detailRow('Original check-out', formatDate(params.checkOutDate))}
+        ${detailRow('Status', declined ? 'Refund request declined' : 'Cancelled')}
+        ${!declined && hasRefund ? `
+          <div class="amount-box">
+            <div class="label">${reviewing ? 'Refund requested' : 'Refund amount'}</div>
+            <div class="amount">${formatCurrency(params.refundAmount!)}</div>
+          </div>
+        ` : ''}
+      </div>
+      ${reviewing ? '<p style="font-size: 13px; color: ' + BRAND.mutedText + ';">This amount is under review and has not yet been approved or sent. If approved, the refund will be returned to your original payment method.</p>' : !declined && hasRefund ? params.refundAmount! > 0 ? '<p style="font-size: 13px; color: ' + BRAND.mutedText + ';">Your refund will be returned to the original payment method. Allow 5–7 business days for it to appear in your account.</p>' : '<p style="font-size: 13px; color: ' + BRAND.mutedText + ';">No refund is due for this cancellation.</p>' : ''}
+      ${params.reason ? detailRow(declined ? 'Reason for this decision' : 'Cancellation reason', escapeHtml(params.reason)) : ''}
+      <div style="text-align: center; margin: 28px 0;">
+        <a href="${escapeHtml(manageUrl)}" class="button">View booking</a>
+      </div>
+      <p style="font-size: 13px; color: ${BRAND.mutedText};">For help with this booking, contact our support team and quote your booking ID.</p>
+    `, true),
+  }
+}
+
 export const emailService = {
   /** Used only by the durable booking-email outbox; payload is frozen before the first attempt. */
   async sendPreparedBookingEmail(payload: import('@/lib/db/booking-email-delivery').BookingEmailPayload, idempotencyKey: string) {
@@ -318,39 +365,14 @@ export const emailService = {
     checkOutDate: string
     refundAmount?: number
   }) {
+    const { subject, html } = bookingCancellationEmail(params, 'cancelled')
     try {
       logger.network('email', 'POST', 'resend/emails', { to: params.to, subject: `Booking Cancelled - ${params.hotelName}` })
       const { data, error } = await resend.emails.send({
         from: BRAND.fromEmail,
         to: params.to,
-        subject: `Booking Cancelled - ${params.hotelName}`,
-        html: emailShell('Booking Cancelled', 'Your booking has been cancelled', `
-          <p>Dear ${params.userName},</p>
-          <p>We're writing to confirm that your booking has been cancelled as requested.</p>
-
-          <div class="booking-details" style="border-left-color: ${BRAND.danger};">
-            <h2 style="margin-top: 0; color: ${BRAND.danger}; font-size: 16px;">Cancelled Booking Details</h2>
-            ${detailRow('Booking ID', params.bookingId)}
-            ${detailRow('Hotel', params.hotelName)}
-            ${detailRow('Check-in', formatDate(params.checkInDate))}
-            ${detailRow('Check-out', formatDate(params.checkOutDate))}
-          </div>
-
-          ${params.refundAmount ? `
-          <div class="notice-box" style="background: ${BRAND.warningLight}; border-left: 4px solid ${BRAND.warning};">
-            <h3 style="margin-top: 0; color: ${BRAND.warningDark};">Refund Information</h3>
-            <p style="margin: 10px 0;">
-              A refund of <strong>${formatCurrency(params.refundAmount)}</strong> will be processed to your original payment method within 5-7 business days.
-            </p>
-          </div>
-          ` : ''}
-
-          <p>We're sorry to see you cancel. We hope to serve you again in the future!</p>
-
-          <div style="text-align: center; margin: 24px 0;">
-            <a href="${BRAND.appUrl}" class="button">Book Again</a>
-          </div>
-        `),
+        subject,
+        html,
       })
 
       if (error) {
@@ -465,7 +487,7 @@ export const emailService = {
   /**
    * Notifies the guest that their refund request was received and is under review.
    * Sent immediately after a successful cancellation via /api/payment/refund.
-   * Refund eligibility follows the 48-hour free cancellation policy.
+   * Refund eligibility follows the cancellation policy saved with the booking.
    */
   async sendRefundRequested(params: {
     to: string
@@ -476,32 +498,14 @@ export const emailService = {
     checkOutDate: string
     refundAmount: number
   }) {
+    const { subject, html } = bookingCancellationEmail(params, 'review')
     try {
       logger.network('email', 'POST', 'resend/emails', { to: params.to, subject: `Cancellation Confirmed - Refund Under Review` })
       const { data, error } = await resend.emails.send({
         from: BRAND.fromEmail,
         to: params.to,
-        subject: `Cancellation Confirmed - Refund Under Review`,
-        html: emailShell('Cancellation Confirmed', 'Your refund request is under review', `
-          <p>Dear ${params.userName},</p>
-          <p>Your booking has been cancelled successfully. Your refund request is now being reviewed by our team.</p>
-
-          <div class="booking-details" style="border-left-color: ${BRAND.warning};">
-            <h2 style="margin-top: 0; color: ${BRAND.warning}; font-size: 16px;">Booking Details</h2>
-            ${detailRow('Booking ID', params.bookingId)}
-            ${detailRow('Hotel', params.hotelName)}
-            ${detailRow('Check-in', formatDate(params.checkInDate))}
-            ${detailRow('Check-out', formatDate(params.checkOutDate))}
-            ${detailRow('Refund Amount', `<strong style="color: ${BRAND.success};">${formatCurrency(params.refundAmount)}</strong>`)}
-          </div>
-
-          <div class="notice-box" style="background: ${BRAND.warningLight}; border-left: 4px solid ${BRAND.warning};">
-            <h3 style="margin-top: 0; color: #92400e;">What happens next?</h3>
-            <p style="margin: 0;">Our team will review your refund request and process it shortly. You will receive another email once your refund has been approved and initiated. The refund will then be credited to your original payment method within 5-7 business days.</p>
-          </div>
-
-          <p style="margin-top: 20px;">If you have any questions, please contact our support team.</p>
-        `),
+        subject,
+        html,
       })
 
       if (error) {
@@ -530,33 +534,14 @@ export const emailService = {
     checkOutDate: string
     reason?: string
   }) {
+    const { subject, html } = bookingCancellationEmail(params, 'declined')
     try {
       logger.network('email', 'POST', 'resend/emails', { to: params.to, subject: `Refund Request Update - ${params.bookingId}` })
       const { data, error } = await resend.emails.send({
         from: BRAND.fromEmail,
         to: params.to,
-        subject: `Refund Request Update - ${params.bookingId}`,
-        html: emailShell('Refund Request Update', `Regarding booking ${params.bookingId}`, `
-          <p>Dear ${params.userName},</p>
-          <p>We have reviewed your refund request for the following booking and are unable to process the refund at this time.</p>
-
-          <div class="booking-details" style="border-left-color: ${BRAND.danger};">
-            <h2 style="margin-top: 0; color: ${BRAND.danger}; font-size: 16px;">Booking Details</h2>
-            ${detailRow('Booking ID', params.bookingId)}
-            ${detailRow('Hotel', params.hotelName)}
-            ${detailRow('Check-in', formatDate(params.checkInDate))}
-            ${detailRow('Check-out', formatDate(params.checkOutDate))}
-          </div>
-
-          ${params.reason ? `
-          <div class="notice-box" style="background: ${BRAND.dangerLight}; border-left: 4px solid ${BRAND.danger};">
-            <h3 style="margin-top: 0; color: #991b1b;">Reason</h3>
-            <p style="margin: 0;">${params.reason}</p>
-          </div>
-          ` : ''}
-
-          <p style="margin-top: 20px;">If you believe this is an error or would like to discuss further, please contact our support team and we'll be happy to assist you.</p>
-        `),
+        subject,
+        html,
       })
 
       if (error) {
@@ -637,7 +622,7 @@ export const emailService = {
           </div>
 
           <p>If you have any questions, feel free to contact us.</p>
-        `),
+        `, params.newStatus === 'cancelled'),
       })
 
       if (error) {

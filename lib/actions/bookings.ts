@@ -12,6 +12,7 @@
  * overlapping responsibilities. These actions are preferred for the public-facing
  * booking flow; BookingService is used by admin panel operations.
  */
+import { hydrateBookingProperties } from '@/lib/services/booking-records.service'
 import { snapshotHotelPolicy } from '@/lib/services/hotel-policy.service'
 import { createAdminClient, createClient } from '@/lib/db/server'
 import { revalidatePath } from 'next/cache'
@@ -328,7 +329,7 @@ export async function getBookingByReference(bookingReference: string) {
 
     return {
       success: true,
-      booking,
+      booking: (await hydrateBookingProperties([booking]))[0],
     }
   } catch (error: any) {
     serverLog.error('Error fetching booking:', error)
@@ -376,7 +377,7 @@ export async function getUserBookings(userId: string) {
 
     return {
       success: true,
-      bookings: bookings || [],
+      bookings: await hydrateBookingProperties(bookings || []),
     }
   } catch (error: any) {
     serverLog.error('Error fetching user bookings:', error)

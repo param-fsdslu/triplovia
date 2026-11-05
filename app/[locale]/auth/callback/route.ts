@@ -1,3 +1,5 @@
+import { verifiedProfilePhone } from '@/lib/firebase/auth/phone-proof'
+import { claimGuestRecords } from '@/lib/services/guest-checkout.service'
 import { NextRequest, NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { adminAuth } from '@/lib/firebase/admin'
@@ -35,6 +37,7 @@ export async function GET(
         // Sign the user in, as the Supabase confirmation link did
         const { idToken } = await signInWithCustomToken(await adminAuth().createCustomToken(user.id))
         await startSession(idToken, user.id)
+        await claimGuestRecords(user.id, verifiedProfilePhone(user.user_metadata))
         return NextResponse.redirect(new URL(redirectPath, origin))
       }
     } catch (err) {

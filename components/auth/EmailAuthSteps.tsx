@@ -1,17 +1,17 @@
 'use client'
 
 /** Email login and email sign-up steps of the login panel */
-import { useActionState, useEffect, useRef } from 'react'
+import { useActionState, useEffect, useRef, useState } from 'react'
 import { MailCheck } from '@/components/icons'
 import { Input } from '@/components/ui/input'
 import { Link } from '@/i18n/routing'
-import { signIn, signUp } from '@/lib/actions/auth'
+import { signIn, signUp, type ProviderSignInResult } from '@/lib/actions/auth'
 import { authInputClass, FieldLabelText, FormError, PasswordInput, PillButton, StepHeader } from './auth-ui'
-import { PhoneNumberInput } from './PhoneNumberInput'
+import { VerifiedPhoneInput } from './VerifiedPhoneInput'
 
 interface EmailLoginStepProps {
   onBack: () => void
-  onSignedIn: () => void
+  onSignedIn: (result: Extract<ProviderSignInResult, { success: true }>) => void
   onCreateAccount: () => void
   onNavigateAway?: () => void
 }
@@ -22,7 +22,7 @@ export function EmailLoginStep({ onBack, onSignedIn, onCreateAccount, onNavigate
   signedIn.current = onSignedIn
 
   useEffect(() => {
-    if (state?.success) signedIn.current()
+    if (state?.success) signedIn.current({ ...state, success: true })
   }, [state])
 
   return (
@@ -80,6 +80,7 @@ interface EmailSignupStepProps {
 
 export function EmailSignupStep({ onBack, onLogin }: EmailSignupStepProps) {
   const [state, formAction, pending] = useActionState(signUp, null)
+  const [phoneProof, setPhoneProof] = useState<{ phone: string; idToken: string } | null>(null)
 
   if (state && 'success' in state && state.success) {
     return (
@@ -131,7 +132,9 @@ export function EmailSignupStep({ onBack, onLogin }: EmailSignupStepProps) {
 
       <div>
         <FieldLabelText htmlFor="auth-signup-phone">Mobile number</FieldLabelText>
-        <PhoneNumberInput id="auth-signup-phone" name="phone" required />
+        <VerifiedPhoneInput id="auth-signup-phone" onVerified={setPhoneProof} />
+        <input type="hidden" name="phone" value={phoneProof?.phone ?? ''} />
+        <input type="hidden" name="phoneIdToken" value={phoneProof?.idToken ?? ''} />
       </div>
 
       <div>
@@ -142,7 +145,7 @@ export function EmailSignupStep({ onBack, onLogin }: EmailSignupStepProps) {
 
       <FormError message={state && 'error' in state ? state.error : null} />
 
-      <PillButton type="submit" busy={pending} className="mt-1">
+      <PillButton type="submit" busy={pending} disabled={!phoneProof} className="mt-1">
         Create account
       </PillButton>
 

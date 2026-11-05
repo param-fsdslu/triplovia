@@ -36,7 +36,7 @@ import {
 } from '@/components/icons'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import { format, isPast, isFuture, startOfToday } from 'date-fns'
+import { format, isValid, isPast, isFuture, startOfToday } from 'date-fns'
 import { cancelBooking } from '@/lib/actions/bookings'
 import { ReviewDialog } from '@/components/reviews/ReviewDialog'
 import { getReviewByBookingId } from '@/lib/actions/reviews'
@@ -47,6 +47,11 @@ import { cn, formatRupees } from '@/lib/utils'
 function calendarDate(value: string) {
   const [y, m, d] = String(value).slice(0, 10).split('-').map(Number)
   return new Date(y, m - 1, d)
+}
+
+function displayDate(value: string, pattern: string, calendar = true) {
+  const date = calendar ? calendarDate(value) : new Date(value)
+  return isValid(date) ? format(date, pattern) : 'Date unavailable'
 }
 
 /** One status per booking, from booking + payment status, most telling first (shown as coloured text) */
@@ -122,7 +127,7 @@ interface Booking {
     city: string
     state: string
     hotel_images?: Array<{ image_url: string; alt_text?: string; is_primary?: boolean; display_order?: number }>
-  }
+  } | null
   room_type: {
     id: string
     name: string
@@ -130,7 +135,7 @@ interface Booking {
       image_url: string
       alt_text?: string
     }>
-  }
+  } | null
 }
 
 interface BookingsListProps {
@@ -243,10 +248,12 @@ export function BookingsList({ bookings }: BookingsListProps) {
 
   const renderBookingCard = (booking: Booking) => {
     // The room's photo, else the hotel's main photo
-    const hotelImage = [...(booking.hotel.hotel_images ?? [])].sort(
+    const hotel = booking.hotel ?? { id: '', name: 'Property unavailable', city: '', state: '' }
+    const room = booking.room_type ?? { id: '', name: 'Room unavailable' }
+    const hotelImage = [...(hotel.hotel_images ?? [])].sort(
       (a, b) => Number(!!b.is_primary) - Number(!!a.is_primary) || (a.display_order ?? 0) - (b.display_order ?? 0)
     )[0]
-    const image = booking.room_type.room_type_images?.[0] ?? hotelImage
+    const image = room.room_type_images?.[0] ?? hotelImage
     const guests = [
       plural(booking.num_adults, 'adult'),
       booking.num_children > 0 ? plural(booking.num_children, 'child', 'children') : null,
@@ -254,8 +261,8 @@ export function BookingsList({ bookings }: BookingsListProps) {
       .filter(Boolean)
       .join(' · ')
     const facts = [
-      { label: 'Check-in', value: format(calendarDate(booking.check_in_date), 'EEE, d MMM') },
-      { label: 'Check-out', value: format(calendarDate(booking.check_out_date), 'EEE, d MMM') },
+      { label: 'Check-in', value: displayDate(booking.check_in_date, 'EEE, d MMM') },
+      { label: 'Check-out', value: displayDate(booking.check_out_date, 'EEE, d MMM') },
       { label: 'Stay', value: plural(booking.num_nights, 'night') },
       { label: 'Guests', value: guests },
     ]
@@ -269,15 +276,15 @@ export function BookingsList({ bookings }: BookingsListProps) {
         <Link
           href={`/bookings/${booking.booking_reference}`}
           className="absolute inset-0 z-[1] rounded-[inherit] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-          aria-label={`Open booking ${booking.booking_reference} at ${booking.hotel.name}`}
+          aria-label={`Open booking ${booking.booking_reference} at ${hotel.name}`}
         />
         <div className="@xl:flex">
           {/* Photo */}
           <div className="relative h-40 shrink-0 overflow-hidden bg-mint @xl:h-auto @xl:w-48">
-            {image ? (
+            {image?.image_url ? (
               <Image
                 src={image.image_url}
-                alt={image.alt_text || booking.hotel.name}
+                alt={image.alt_text || hotel.name}
                 fill
                 sizes="(min-width: 640px) 192px, 100vw"
                 className="object-cover transition-transform duration-500 group-hover:scale-[1.03]"
@@ -295,12 +302,12 @@ export function BookingsList({ bookings }: BookingsListProps) {
               <div className="min-w-0">
                 <StatusLabel booking={booking} />
                 <h3 className="mt-1 text-lg font-bold leading-snug text-foreground transition-colors group-hover:text-primary">
-                  {booking.hotel.name}
+                  {hotel.name}
                 </h3>
                 <p className="mt-0.5 flex items-center gap-1.5 text-sm text-muted-foreground">
                   <MapPin className="h-3.5 w-3.5 shrink-0 text-primary" />
                   <span className="truncate">
-                    {booking.hotel.city}, {booking.hotel.state} · {booking.room_type.name}
+                    {hotel.city}, {hotel.state} · {room.name}
                   </span>
                 </p>
               </div>
@@ -326,7 +333,7 @@ export function BookingsList({ bookings }: BookingsListProps) {
               <p className="text-xs text-muted-foreground">
                 Booking ID <span className="font-semibold text-foreground">{booking.booking_reference}</span>
                 <span className="mx-1.5">·</span>
-                Booked {format(new Date(booking.created_at), 'd MMM yyyy')}
+                Booked {displayDate(booking.created_at, 'd MMM yyyy', false)}
               </p>
               {/* Actions as plain text links, no pills or View button (the whole card opens the booking), by request */}
               <div className="relative z-10 ml-auto flex flex-wrap items-center justify-end gap-x-5 gap-y-2">
@@ -488,11 +495,11 @@ export function BookingsList({ bookings }: BookingsListProps) {
               {/* Booking summary */}
               <div className="bg-muted/50 p-3 rounded-lg">
                 <p className="font-semibold text-foreground mb-1">
-                  {selectedBooking.hotel.name}
+                  {selectedBooking.hotel?.name ?? 'Property unavailable'}
                 </p>
                 <p className="text-sm text-muted-foreground">
-                  {format(new Date(selectedBooking.check_in_date), 'MMM dd')} –{' '}
-                  {format(new Date(selectedBooking.check_out_date), 'MMM dd, yyyy')}
+                  {displayDate(selectedBooking.check_in_date, 'MMM dd')} –{' '}
+                  {displayDate(selectedBooking.check_out_date, 'MMM dd, yyyy')}
                   {' · '}Ref: {selectedBooking.booking_reference}
                 </p>
               </div>
@@ -585,7 +592,7 @@ export function BookingsList({ bookings }: BookingsListProps) {
           booking={{
             id: selectedBookingForReview.id,
             booking_reference: selectedBookingForReview.booking_reference,
-            hotel: selectedBookingForReview.hotel,
+            hotel: selectedBookingForReview.hotel ?? { id: '', name: 'Property unavailable' },
             check_in_date: selectedBookingForReview.check_in_date,
             check_out_date: selectedBookingForReview.check_out_date,
           }}

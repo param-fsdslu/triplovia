@@ -278,6 +278,8 @@ export async function upsertFederatedUser(
       last_name: name.last || undefined,
       full_name: record.displayName?.trim() || undefined,
       phone,
+      verified_phone: phone,
+      phone_verified_at: phone ? now : undefined,
       avatar_url: record.photoURL ?? undefined,
     })
     const doc: AuthUserDoc = {
@@ -303,7 +305,11 @@ export async function upsertFederatedUser(
   if (!meta.first_name && name.first) meta.first_name = filled.first_name = name.first
   if (!meta.last_name && name.last) meta.last_name = filled.last_name = name.last
   if (!meta.full_name) meta.full_name = fullName(meta)
-  if (!meta.phone && phone) meta.phone = filled.phone = phone
+  if (phone) {
+    meta.phone = filled.phone = phone
+    meta.verified_phone = phone
+    meta.phone_verified_at = now
+  }
   if (!meta.avatar_url && record.photoURL) meta.avatar_url = record.photoURL
 
   const doc: AuthUserDoc = {
@@ -332,7 +338,7 @@ export async function upsertFederatedUser(
  */
 export async function fillMissingUserDetails(
   uid: string,
-  details: { firstName?: string; lastName?: string; email?: string; phone?: string }
+  details: { firstName?: string; lastName?: string; email?: string; verifiedPhone?: string }
 ): Promise<AuthUser | null> {
   const ref = users().doc(uid)
   const snap = await ref.get()
@@ -343,7 +349,11 @@ export async function fillMissingUserDetails(
   const filled: Record<string, unknown> = {}
   if (!meta.first_name && details.firstName) meta.first_name = filled.first_name = details.firstName
   if (!meta.last_name && details.lastName) meta.last_name = filled.last_name = details.lastName
-  if (!meta.phone && details.phone) meta.phone = filled.phone = details.phone
+  if (details.verifiedPhone) {
+    meta.phone = filled.phone = details.verifiedPhone
+    meta.verified_phone = details.verifiedPhone
+    meta.phone_verified_at = new Date().toISOString()
+  }
   const nameChanged = 'first_name' in filled || 'last_name' in filled
   if (nameChanged) meta.full_name = fullName(meta)
 

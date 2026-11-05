@@ -1,10 +1,5 @@
 'use client'
 
-/**
- * Firebase phone auth for the login panel: sends a 6-digit SMS code behind an invisible
- * reCAPTCHA and confirms it, yielding an ID token for the signInWithProvider action.
- * Attach `recaptchaHost` to an element that stays mounted for the whole flow.
- */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { RecaptchaVerifier, signInWithPhoneNumber, signOut, type ConfirmationResult } from 'firebase/auth'
 import { clientAuth } from '@/lib/firebase/client'
@@ -15,46 +10,62 @@ export function usePhoneAuth() {
   const recaptchaHost = useRef<HTMLDivElement>(null)
   const verifier = useRef<RecaptchaVerifier | null>(null)
   const confirmation = useRef<ConfirmationResult | null>(null)
+  const deadline = useRef(0)
+  const sending = useRef(false)
+  const mounted = useRef(true)
   const [sentTo, setSentTo] = useState<string | null>(null)
   const [resendIn, setResendIn] = useState(0)
 
-  useEffect(() => () => verifier.current?.clear(), [])
-
   useEffect(() => {
-    if (resendIn <= 0) return
-    const timer = setTimeout(() => setResendIn((s) => s - 1), 1000)
-    return () => clearTimeout(timer)
-  }, [resendIn])
-
-  /** Sends the code; throws a Firebase error on failure */
-  const sendCode = useCallback(async (phone: string) => {
-    const auth = clientAuth()
-    // A fresh element per attempt: a reCAPTCHA widget can't be rendered twice into one
-    verifier.current?.clear()
-    const container = document.createElement('div')
-    recaptchaHost.current!.replaceChildren(container)
-    verifier.current = new RecaptchaVerifier(auth, container, { size: 'invisible' })
-    try {
-      confirmation.current = await signInWithPhoneNumber(auth, phone, verifier.current)
-    } catch (err) {
-      verifier.current.clear()
+    mounted.current = true
+    return () => {
+      mounted.current = false
+      try { verifier.current?.clear() } catch { /* Widget may already have been removed. */ }
       verifier.current = null
-      throw err
     }
-    setSentTo(phone)
-    setResendIn(RESEND_SECONDS)
   }, [])
 
-  /** Confirms the code and returns an ID token; throws a Firebase error on a wrong/expired code */
+  useEffect(() => {
+    if (!resendIn) return
+    const timer = window.setInterval(() => setResendIn(Math.max(0, Math.ceil((deadline.current - Date.now()) / 1000))), 1000)
+    return () => window.clearInterval(timer)
+  }, [resendIn])
+
+  const sendCode = useCallback(async (phone: string) => {
+    if (sending.current || Date.now() < deadline.current) throw Object.assign(new Error('Please wait before requesting another code'), { code: 'auth/too-many-requests' })
+    const host = recaptchaHost.current
+    if (!host) throw new Error('Phone verification is not ready. Please try again.')
+    sending.current = true
+    deadline.current = Date.now() + RESEND_SECONDS * 1000
+    setResendIn(RESEND_SECONDS)
+    try {
+      const auth = clientAuth()
+      try { verifier.current?.clear() } catch { /* A fresh widget replaces the previous one. */ }
+      verifier.current = null
+      const container = document.createElement('div')
+      host.replaceChildren(container)
+      const widget = new RecaptchaVerifier(auth, container, { size: 'invisible' })
+      verifier.current = widget
+      const result = await signInWithPhoneNumber(auth, phone, widget)
+      if (mounted.current) {
+        confirmation.current = result
+        setSentTo(phone)
+        deadline.current = Date.now() + RESEND_SECONDS * 1000
+        setResendIn(RESEND_SECONDS)
+      }
+    } catch (error) {
+      try { verifier.current?.clear() } catch { /* Ignore an already-cleared widget. */ }
+      verifier.current = null
+      throw error
+    } finally { sending.current = false }
+  }, [])
+
   const confirm = useCallback(async (code: string) => {
     if (!confirmation.current) throw new Error('No verification code was requested')
     const credential = await confirmation.current.confirm(code)
-    const idToken = await credential.user.getIdToken()
-    await signOut(clientAuth()).catch(() => {})
-    return idToken
+    try { return await credential.user.getIdToken(true) } finally { await signOut(clientAuth()).catch(() => {}) }
   }, [])
 
-  const reset = useCallback(() => setSentTo(null), [])
-
+  const reset = useCallback(() => { confirmation.current = null; setSentTo(null) }, [])
   return { recaptchaHost, sentTo, resendIn, sendCode, confirm, reset }
 }

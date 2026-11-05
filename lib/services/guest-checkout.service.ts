@@ -138,6 +138,8 @@ export async function claimGuestRecords(userId: string, phone: string | null | u
       await admin
         .from('bookings')
         .update({ user_id: userId, guest_access_hash: null })
+        .eq('guest_phone', phone)
+        .is('user_id', null)
         .in(
           'id',
           bookings.map((b: any) => b.id)
@@ -152,8 +154,8 @@ export async function claimGuestRecords(userId: string, phone: string | null | u
         .eq('user_id', userId)
         .eq('hotel_id', stay.hotel_id)
         .maybeSingle()
-      if (own) await admin.from('saved_stays').delete().eq('id', stay.id)
-      else await admin.from('saved_stays').update({ user_id: userId, guest_phone: null }).eq('id', stay.id)
+      if (own) await admin.from('saved_stays').delete().eq('id', stay.id).is('user_id', null)
+      else await admin.from('saved_stays').update({ user_id: userId, guest_phone: null }).eq('id', stay.id).is('user_id', null)
     }
   } catch (error) {
     // Never block a sign-in over this; the next sign-in with the number tries again
