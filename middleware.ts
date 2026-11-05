@@ -7,6 +7,8 @@ import { SESSION_COOKIE } from '@/lib/firebase/auth/constants';
 
 const intlMiddleware = createMiddleware(routing);
 
+
+// Middleware runs on the edge (Netlify), where firebase-admin can't run, so this is
 export async function middleware(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
   // Firebase's OAuth helpers are proxied by Netlify; never add a locale prefix.
