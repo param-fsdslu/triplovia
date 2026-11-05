@@ -2,6 +2,7 @@ import { calculateHotelRefund } from '@/lib/config/hotel-cancellation-policy'
 import { NextRequest, NextResponse } from 'next/server'
 import { razorpayInstance } from '@/lib/razorpay/config'
 import { razorpayErrorMessage } from '@/lib/razorpay/errors'
+import { normalRefundOptions } from '@/lib/razorpay/refund-options'
 import { createClient, createAdminClient } from '@/lib/db/server'
 import { emailService } from '@/lib/services/email.service'
 import { withApiLogging } from '@/lib/utils/with-api-logging'
@@ -422,11 +423,7 @@ async function postHandler(request: NextRequest) {
       const refundResponse = await razorpayInstance.payments.refund(
         payment.payment_gateway_payment_id,
         {
-          amount: Math.round(finalRefundAmount * 100),
-          // 'optimum' attempts instant processing first, falls back to normal
-          // (5-7 days) automatically if the payment method doesn't support it.
-          // Razorpay charges a small fee for instant; auto-waived on fallback.
-          speed: 'optimum',
+          ...normalRefundOptions(finalRefundAmount),
           notes: {
             booking_id: bookingId,
             booking_reference: booking.booking_reference,

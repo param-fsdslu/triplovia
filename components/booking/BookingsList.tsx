@@ -12,20 +12,11 @@ import {
   TabsTrigger,
 } from '@/components/ui/tabs'
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
-import {
   Calendar,
   MapPin,
   Clock,
   X,
   Hotel,
-  AlertCircle,
   Download,
   Star,
   MessageSquare,
@@ -33,11 +24,9 @@ import {
   XCircle,
   CheckCircle2,
   KeyRound,
+  Headset,
 } from '@/components/icons'
-import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
-import { format, isValid, isPast, isFuture, startOfToday } from 'date-fns'
-import { cancelBooking } from '@/lib/actions/bookings'
+import { format, isValid, isPast, startOfToday } from 'date-fns'
 import { ReviewDialog } from '@/components/reviews/ReviewDialog'
 import { getReviewByBookingId } from '@/lib/actions/reviews'
 import { invoiceUrl, isInvoiceable } from '@/lib/utils/invoice'
@@ -99,15 +88,6 @@ const REFUND_NOTES: Record<string, { text: string; tone: 'info' | 'error'; icon:
   refund_rejected: { text: 'Refund not approved — contact support for details', tone: 'error', icon: XCircle },
 }
 
-const CANCEL_REASONS = [
-  'Change of plans',
-  'Found a better option',
-  'Medical / health reasons',
-  'Travel restrictions',
-  'Personal emergency',
-  'Other',
-]
-
 interface Booking {
   id: string
   booking_reference: string
@@ -144,12 +124,6 @@ interface BookingsListProps {
 
 export function BookingsList({ bookings }: BookingsListProps) {
   const router = useRouter()
-  const [cancelDialogOpen, setCancelDialogOpen] = useState(false)
-  const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null)
-  const [isCancelling, setIsCancelling] = useState(false)
-  const [cancelReason, setCancelReason] = useState('')
-  const [cancelReasonOther, setCancelReasonOther] = useState('')
-  const [cancelReasonError, setCancelReasonError] = useState(false)
   const [reviewDialogOpen, setReviewDialogOpen] = useState(false)
   const [selectedBookingForReview, setSelectedBookingForReview] = useState<Booking | null>(null)
   const [bookingReviews, setBookingReviews] = useState<Record<string, any>>({})
@@ -187,63 +161,9 @@ export function BookingsList({ bookings }: BookingsListProps) {
     }
   }, [pastBookings])
 
-  const handleCancelClick = (booking: Booking) => {
-    setSelectedBooking(booking)
-    setCancelReason('')
-    setCancelReasonOther('')
-    setCancelReasonError(false)
-    setCancelDialogOpen(true)
-  }
-
   const handleReviewClick = (booking: Booking) => {
     setSelectedBookingForReview(booking)
     setReviewDialogOpen(true)
-  }
-
-  const handleConfirmCancel = async () => {
-    if (!selectedBooking) return
-
-    const resolvedReason = cancelReason === 'Other' ? cancelReasonOther.trim() : cancelReason
-    if (!resolvedReason) {
-      setCancelReasonError(true)
-      return
-    }
-    setCancelReasonError(false)
-
-    setIsCancelling(true)
-    try {
-      if (selectedBooking.payment_status === 'paid') {
-        const response = await fetch('/api/payment/refund', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            bookingId: selectedBooking.id,
-            reason: resolvedReason,
-            isAdminInitiated: false,
-            bookingType: 'hotel',
-          }),
-        })
-        const data = await response.json()
-        if (!response.ok) {
-          alert(data.error || 'Failed to cancel booking')
-          return
-        }
-      } else {
-        const result = await cancelBooking(selectedBooking.id, resolvedReason)
-        if (!result.success) {
-          alert(result.error || 'Failed to cancel booking')
-          return
-        }
-      }
-
-      setCancelDialogOpen(false)
-      setSelectedBooking(null)
-      router.refresh()
-    } catch (error) {
-      alert('Failed to cancel booking')
-    } finally {
-      setIsCancelling(false)
-    }
   }
 
   const renderBookingCard = (booking: Booking) => {
@@ -367,17 +287,10 @@ export function BookingsList({ bookings }: BookingsListProps) {
                     Invoice
                   </a>
                 )}
-                {booking.booking_status === 'confirmed' &&
-                  isFuture(new Date(booking.check_in_date)) && (
-                    <button
-                      type="button"
-                      onClick={() => handleCancelClick(booking)}
-                      className={cn(ACTION_LINK, 'text-destructive hover:text-destructive/80')}
-                    >
-                      <X className="h-4 w-4" />
-                      Cancel
-                    </button>
-                  )}
+                <Link href={`/bookings/${booking.booking_reference}#need-help`} className={cn(ACTION_LINK, 'text-primary hover:text-primary-hover')}>
+                  <Headset className="h-4 w-4" />
+                  Need help?
+                </Link>
               </div>
             </div>
 
@@ -477,114 +390,6 @@ export function BookingsList({ bookings }: BookingsListProps) {
           )}
         </TabsContent>
       </Tabs>
-
-      {/* Cancel Confirmation Dialog */}
-      <Dialog open={cancelDialogOpen} onOpenChange={(open) => {
-        if (!isCancelling) setCancelDialogOpen(open)
-      }}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Cancel Booking</DialogTitle>
-            <DialogDescription>
-              Please tell us why you&apos;re cancelling so we can improve.
-            </DialogDescription>
-          </DialogHeader>
-
-          {selectedBooking && (
-            <div className="space-y-4 py-2">
-              {/* Booking summary */}
-              <div className="bg-muted/50 p-3 rounded-lg">
-                <p className="font-semibold text-foreground mb-1">
-                  {selectedBooking.hotel?.name ?? 'Property unavailable'}
-                </p>
-                <p className="text-sm text-muted-foreground">
-                  {displayDate(selectedBooking.check_in_date, 'MMM dd')} –{' '}
-                  {displayDate(selectedBooking.check_out_date, 'MMM dd, yyyy')}
-                  {' · '}Ref: {selectedBooking.booking_reference}
-                </p>
-              </div>
-
-              {/* Reason selector */}
-              <div className="space-y-2">
-                <Label className={cancelReasonError ? 'text-destructive' : ''}>
-                  Reason for cancellation <span className="text-destructive">*</span>
-                </Label>
-                <div className="space-y-2">
-                  {CANCEL_REASONS.map((reason) => (
-                    <label
-                      key={reason}
-                      className="flex items-center gap-3 p-2.5 rounded-lg border border-border hover:bg-muted/40 cursor-pointer transition-colors has-checked:border-primary has-checked:bg-primary/5"
-                    >
-                      <input
-                        type="radio"
-                        name="cancel-reason"
-                        value={reason}
-                        checked={cancelReason === reason}
-                        onChange={() => { setCancelReason(reason); setCancelReasonError(false) }}
-                        className="accent-primary"
-                      />
-                      <span className="text-sm">{reason}</span>
-                    </label>
-                  ))}
-                </div>
-
-                {cancelReason === 'Other' && (
-                  <Textarea
-                    placeholder="Please describe your reason..."
-                    value={cancelReasonOther}
-                    onChange={(e) => { setCancelReasonOther(e.target.value); setCancelReasonError(false) }}
-                    rows={3}
-                    className={cancelReasonError ? 'border-destructive' : ''}
-                  />
-                )}
-
-                {cancelReasonError && (
-                  <p className="flex items-center gap-1.5 text-xs text-destructive">
-                    <AlertCircle className="h-3 w-3 shrink-0" />
-                    Please select a reason before cancelling
-                  </p>
-                )}
-              </div>
-
-              {/* Refund / policy notice */}
-              {selectedBooking.payment_status === 'paid' ? (
-                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 flex gap-3">
-                  <AlertCircle className="h-5 w-5 text-yellow-600 shrink-0 mt-0.5" />
-                  <div className="text-sm text-yellow-800">
-                    <p className="font-medium mb-1">Refund Policy</p>
-                    <p>Your refund request will be submitted for admin review and processed within 5–7 business days.</p>
-                  </div>
-                </div>
-              ) : (
-                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 flex gap-3">
-                  <AlertCircle className="h-5 w-5 text-yellow-600 shrink-0 mt-0.5" />
-                  <div className="text-sm text-yellow-800">
-                    <p className="font-medium mb-1">Cancellation Policy</p>
-                    <p>This action cannot be undone.</p>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setCancelDialogOpen(false)}
-              disabled={isCancelling}
-            >
-              Keep Booking
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={handleConfirmCancel}
-              disabled={isCancelling}
-            >
-              {isCancelling ? 'Cancelling...' : 'Confirm Cancellation'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       {/* Review Dialog */}
       {selectedBookingForReview && (

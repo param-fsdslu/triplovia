@@ -17,6 +17,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Input } from '@/components/ui/input'
 import { useRouter } from 'next/navigation'
 import { Badge } from '@/components/ui/badge'
+import { formatRupees } from '@/lib/utils'
 
 interface RefundButtonProps {
   bookingId: string
@@ -53,7 +54,7 @@ export function RefundButton({
       const data = await response.json()
       setRefundEligibility(data)
       setVendorCancelled(false)
-      setEditedAmount(data.refundAmount != null ? String(Math.round(data.refundAmount)) : '')
+      setEditedAmount(data.refundAmount != null ? Number(data.refundAmount).toFixed(2) : '')
       setIsEditingAmount(false)
       setIsOpen(true)
     } catch (err) {
@@ -66,13 +67,13 @@ export function RefundButton({
   const isAmountOverridden =
     isEditingAmount &&
     Number.isFinite(parsedEditedAmount) &&
-    Math.round(parsedEditedAmount) !== Math.round(refundEligibility?.refundAmount ?? 0)
+    Math.round(parsedEditedAmount * 100) !== Math.round((refundEligibility?.refundAmount ?? 0) * 100)
   const isEditedAmountValid =
     Number.isFinite(parsedEditedAmount) && parsedEditedAmount >= 0 && parsedEditedAmount <= totalAmount
 
   const processRefund = async () => {
     if (isEditingAmount && !isEditedAmountValid) {
-      setError(`Refund amount must be between ₹0 and ₹${Math.round(totalAmount).toLocaleString('en-IN')}`)
+      setError(`Refund amount must be between ₹0 and ${formatRupees(totalAmount)}`)
       return
     }
 
@@ -99,7 +100,7 @@ export function RefundButton({
       }
 
       alert(
-        `Refund processed successfully!\n\nRefund ID: ${data.refund.refundId}\nAmount: ₹${Math.round(data.refund.refundAmount).toLocaleString('en-IN')}\n\nThe refund will be credited within ${data.refund.estimatedDays}.`
+        `Refund processed successfully!\n\nRefund ID: ${data.refund.refundId}\nAmount: ${formatRupees(data.refund.refundAmount)}\n\nThe refund will be credited within ${data.refund.estimatedDays}.`
       )
       setIsOpen(false)
       router.refresh()
@@ -127,7 +128,7 @@ export function RefundButton({
           <DialogHeader>
             <DialogTitle>Process Refund</DialogTitle>
             <DialogDescription>
-              Booking: {bookingReference}
+              Booking: {bookingReference}. Normal refunds usually take 5–7 business days.
             </DialogDescription>
           </DialogHeader>
 
@@ -166,19 +167,18 @@ export function RefundButton({
                   <div className="space-y-1 text-sm">
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Total Paid:</span>
-                      <span>₹{Math.round(totalAmount).toLocaleString('en-IN')}</span>
+                      <span>{formatRupees(totalAmount)}</span>
                     </div>
                     <div className="flex justify-between text-red-600">
                       <span>Cancellation Charge:</span>
                       <span>
-                        -₹
-                        {Math.round(refundEligibility.cancellationCharge).toLocaleString('en-IN')}
+                        -{formatRupees(refundEligibility.cancellationCharge)}
                       </span>
                     </div>
                     <div className="border-t pt-2 flex justify-between items-center font-semibold text-base">
                       <span>Calculated Refund:</span>
                       <span className="text-green-600">
-                        ₹{Math.round(refundEligibility.refundAmount).toLocaleString('en-IN')}
+                        {formatRupees(refundEligibility.refundAmount)}
                       </span>
                     </div>
                   </div>
@@ -211,11 +211,11 @@ export function RefundButton({
                       disabled={vendorCancelled || !isEditingAmount}
                     />
                     <p className="text-xs text-muted-foreground">
-                      Cannot exceed the amount paid (₹{Math.round(totalAmount).toLocaleString('en-IN')}).
+                      Cannot exceed the amount paid ({formatRupees(totalAmount)}).
                     </p>
                     {isEditingAmount && !isEditedAmountValid && (
                       <p className="text-xs text-red-600">
-                        Enter an amount between ₹0 and ₹{Math.round(totalAmount).toLocaleString('en-IN')}.
+                        Enter an amount between ₹0 and {formatRupees(totalAmount)}.
                       </p>
                     )}
                     {isAmountOverridden && isEditedAmountValid && (

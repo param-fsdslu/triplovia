@@ -12,7 +12,7 @@ import { Hotel } from '@/components/icons'
 
 /**
  * My Bookings — the account's home for trips: rooms picked but not paid for (saved stays), then
- * every booking in Upcoming / Past / Cancelled tabs with view, invoice, cancel and review actions.
+ * every booking in Upcoming / Past / Cancelled tabs. Cancellation is in the booking's Need help section.
  */
 export default async function MyBookingsPage() {
   const db = await createClient()

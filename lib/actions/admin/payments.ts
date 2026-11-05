@@ -5,6 +5,7 @@ import { requireAdmin, requireSuperAdmin, getAdminHotelAccess } from '@/lib/util
 import { revalidatePath } from 'next/cache'
 import { razorpayInstance } from '@/lib/razorpay/config'
 import { razorpayErrorMessage } from '@/lib/razorpay/errors'
+import { normalRefundOptions } from '@/lib/razorpay/refund-options'
 import { emailService } from '@/lib/services/email.service'
 import { logger } from '@/lib/utils/logger'
 import { ADMIN_PATH } from '@/lib/config/admin-path'
@@ -390,11 +391,7 @@ export async function approveRefundRequest(refundTransactionId: string, override
       refundResponse = await razorpayInstance.payments.refund(
         gatewayPaymentId,
         {
-          amount: refundAmountPaise,
-          // 'optimum' attempts instant processing first, falls back to normal
-          // (5-7 days) automatically. Razorpay charges a small fee for instant;
-          // auto-waived on fallback.
-          speed: 'optimum',
+          ...normalRefundOptions(finalRefundAmount),
           notes: {
             booking_reference: activeBooking.booking_reference || '',
             reason: refundTx.refund_reason || 'Admin approved refund',

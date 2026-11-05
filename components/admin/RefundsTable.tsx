@@ -26,6 +26,7 @@ import {
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
+import { formatRupees } from '@/lib/utils'
 import { approveRefundRequest, rejectRefundRequest } from '@/lib/actions/admin'
 
 interface RefundTransaction {
@@ -79,7 +80,7 @@ export function RefundsTable({ refunds }: RefundsTableProps) {
   const getStatusBadge = (status: string): { variant: 'default' | 'secondary' | 'destructive' | 'outline', label: string, title: string } => {
     const map: Record<string, { variant: 'default' | 'secondary' | 'destructive' | 'outline', label: string, title: string }> = {
       pending_approval: { variant: 'outline',     label: 'Pending Approval', title: 'Customer cancelled — waiting for admin to approve or reject the refund' },
-      processing:       { variant: 'secondary',   label: 'Processing',       title: 'Refund submitted to Razorpay — money in transit (5-7 days for normal, instant for optimum)' },
+      processing:       { variant: 'secondary',   label: 'Processing',       title: 'Refund submitted to Razorpay — awaiting completion' },
       completed:        { variant: 'default',     label: 'Refunded ✓',       title: 'Razorpay confirmed the refund was credited to the customer' },
       failed:           { variant: 'destructive', label: 'Failed',            title: 'Razorpay rejected the refund — see error details' },
       rejected:         { variant: 'destructive', label: 'Rejected',          title: 'Admin rejected the refund request — customer was notified' },
@@ -98,7 +99,7 @@ export function RefundsTable({ refunds }: RefundsTableProps) {
 
   const openApproveDialog = (refund: RefundTransaction) => {
     setApproveRefund(refund)
-    setApproveAmount(String(Math.round(parseFloat(refund.refund_amount))))
+    setApproveAmount(Number(refund.refund_amount).toFixed(2))
     setIsApproveOpen(true)
   }
 
@@ -107,7 +108,7 @@ export function RefundsTable({ refunds }: RefundsTableProps) {
   const isApproveAmountValid =
     Number.isFinite(parsedApproveAmount) && parsedApproveAmount >= 0 && parsedApproveAmount <= approveTotalPaid
   const isApproveAmountOverridden =
-    approveRefund != null && Math.round(parsedApproveAmount) !== Math.round(parseFloat(approveRefund.refund_amount))
+    approveRefund != null && Math.round(parsedApproveAmount * 100) !== Math.round(parseFloat(approveRefund.refund_amount) * 100)
 
   const handleApprove = async () => {
     if (!approveRefund || !isApproveAmountValid) return
@@ -158,8 +159,8 @@ export function RefundsTable({ refunds }: RefundsTableProps) {
 
   const exportColumns: ExportColumn[] = [
     { header: 'Booking Ref', accessor: (r: any) => (r.booking ?? r.boat_booking)?.booking_reference || 'N/A' },
-    { header: 'Refund Amount (₹)', accessor: (r: any) => Math.round(parseFloat(r.refund_amount)).toLocaleString('en-IN') },
-    { header: 'Cancellation Charge (₹)', accessor: (r: any) => Math.round(parseFloat(r.cancellation_charge || '0')).toLocaleString('en-IN') },
+    { header: 'Refund Amount (₹)', accessor: (r: any) => Number(r.refund_amount).toFixed(2) },
+    { header: 'Cancellation Charge (₹)', accessor: (r: any) => Number(r.cancellation_charge || 0).toFixed(2) },
     { header: 'Type', accessor: (r: any) => r.is_full_refund ? 'Full' : 'Partial' },
     { header: 'Status', accessor: 'status' },
     { header: 'Razorpay Refund ID', accessor: (r: any) => r.refund_gateway_id || 'N/A' },
@@ -205,11 +206,11 @@ export function RefundsTable({ refunds }: RefundsTableProps) {
                       {activeBooking?.booking_reference || 'N/A'}
                     </TableCell>
                     <TableCell className="font-semibold text-green-600">
-                      ₹{Math.round(parseFloat(refund.refund_amount)).toLocaleString('en-IN')}
+                      {formatRupees(Number(refund.refund_amount))}
                     </TableCell>
                     <TableCell className="text-red-600">
                       {refund.cancellation_charge
-                        ? `₹${Math.round(parseFloat(refund.cancellation_charge)).toLocaleString('en-IN')}`
+                        ? formatRupees(Number(refund.cancellation_charge))
                         : '₹0'}
                     </TableCell>
                     <TableCell>
@@ -357,20 +358,19 @@ export function RefundsTable({ refunds }: RefundsTableProps) {
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Total Paid Amount</span>
                     <span className="font-semibold">
-                      ₹{Math.round(parseFloat(selectedRefund.total_paid)).toLocaleString('en-IN')}
+                      {formatRupees(Number(selectedRefund.total_paid))}
                     </span>
                   </div>
                   <div className="flex justify-between text-red-600">
                     <span>Cancellation Charge</span>
                     <span className="font-semibold">
-                      -₹
-                      {Math.round(parseFloat(selectedRefund.cancellation_charge || '0')).toLocaleString('en-IN')}
+                      -{formatRupees(Number(selectedRefund.cancellation_charge || 0))}
                     </span>
                   </div>
                   <div className="border-t pt-2 flex justify-between text-lg">
                     <span className="font-semibold">Refund Amount</span>
                     <span className="font-bold text-green-600">
-                      ₹{Math.round(parseFloat(selectedRefund.refund_amount)).toLocaleString('en-IN')}
+                      {formatRupees(Number(selectedRefund.refund_amount))}
                     </span>
                   </div>
                   <div className="text-sm text-muted-foreground">
@@ -497,19 +497,19 @@ export function RefundsTable({ refunds }: RefundsTableProps) {
           <DialogHeader>
             <DialogTitle>Approve Refund</DialogTitle>
             <DialogDescription>
-              Razorpay will be called immediately to process this refund. Review or adjust the amount before confirming.
+              Review or adjust the amount before confirming. Normal refunds usually reach the original payment method within 5–7 business days.
             </DialogDescription>
           </DialogHeader>
           {approveRefund && (
             <div className="space-y-4">
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Total Paid</span>
-                <span className="font-medium">₹{Math.round(approveTotalPaid).toLocaleString('en-IN')}</span>
+                <span className="font-medium">{formatRupees(approveTotalPaid)}</span>
               </div>
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Customer-Requested Amount</span>
                 <span className="font-medium">
-                  ₹{Math.round(parseFloat(approveRefund.refund_amount)).toLocaleString('en-IN')}
+                  {formatRupees(Number(approveRefund.refund_amount))}
                 </span>
               </div>
               <div className="space-y-2">
@@ -524,11 +524,11 @@ export function RefundsTable({ refunds }: RefundsTableProps) {
                   onChange={(e) => setApproveAmount(e.target.value)}
                 />
                 <p className="text-xs text-muted-foreground">
-                  Cannot exceed the amount paid (₹{Math.round(approveTotalPaid).toLocaleString('en-IN')}).
+                  Cannot exceed the amount paid ({formatRupees(approveTotalPaid)}).
                 </p>
                 {!isApproveAmountValid && (
                   <p className="text-xs text-red-600">
-                    Enter an amount between ₹0 and ₹{Math.round(approveTotalPaid).toLocaleString('en-IN')}.
+                    Enter an amount between ₹0 and {formatRupees(approveTotalPaid)}.
                   </p>
                 )}
                 {isApproveAmountOverridden && isApproveAmountValid && (

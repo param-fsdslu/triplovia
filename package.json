@@ -8,6 +8,8 @@
     "build": "next build --turbopack",
     "start": "next start",
     "lint": "eslint",
+    "test:refund": "tsc -p lib/db/__tests__/tsconfig.json && node node_modules/.cache/db-tests/lib/db/__tests__/razorpay-refund.test.js",
+    "test:booking-cancellation": "tsc -p lib/db/__tests__/tsconfig.json && node node_modules/.cache/db-tests/lib/db/__tests__/booking-cancellation.test.js",
     "test:admin-bookings": "tsc -p lib/db/__tests__/tsconfig.json && node node_modules/.cache/db-tests/lib/db/__tests__/admin-bookings-render.test.js",
     "test:auth": "tsc -p lib/db/__tests__/tsconfig.json && node node_modules/.cache/db-tests/lib/db/__tests__/phone-proof.test.js",
     "test:email": "tsc -p lib/db/__tests__/tsconfig.json && node node_modules/.cache/db-tests/lib/db/__tests__/booking-email-delivery.test.js",
