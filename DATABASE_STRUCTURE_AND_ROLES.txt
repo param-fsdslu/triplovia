@@ -1,0 +1,1381 @@
+====================================================================================================
+HONNAVAR TRAVELS (triplovia) â€” COMPLETE DATA STRUCTURE & ROLES
+Source: schema.sql (Supabase pg_dump of "public" schema), roles.sql, lib/utils/roles.ts,
+        lib/utils/admin.ts, supabase/migrations/all_storage_setup.sql
+Database: Supabase PostgreSQL (Row Level Security)
+====================================================================================================
+
+CONTENTS
+  SECTION 0: ROLES & ACCESS CONTROL
+  SECTION 1: TABLES (columns, keys, constraints, indexes, RLS policies)
+  SECTION 2: VIEWS
+  SECTION 3: FUNCTIONS
+  SECTION 4: TRIGGERS
+  SECTION 5: RELATIONSHIP MAP
+  SECTION 6: STORAGE BUCKETS
+
+====================================================================================================
+SECTION 0: ROLES & ACCESS CONTROL
+====================================================================================================
+
+A) APPLICATION ROLES  (stored in auth.users.raw_user_meta_data.role, mirrored to public.profiles.role)
+----------------------------------------------------------------------------------------------------
+  Role            | Display name | Scope
+  ----------------+--------------+------------------------------------------------------------------
+  super_admin     | Super Admin  | Everything: all hotels/boats, all bookings, analytics, users, blogs
+  admin (legacy)  | Super Admin  | Treated exactly like super_admin (backwards compatibility)
+  hotel_admin     | Hotel Admin  | Only hotels listed in user_metadata.hotel_ids[] (uuid array)
+  (no role)       | Guest/User   | Regular customer: own bookings, own profile, own reviews
+
+  user_metadata shape:
+    { role?: 'super_admin' | 'hotel_admin' | 'admin', hotel_ids?: string[] }
+
+  Permission matrix (lib/utils/roles.ts -> canPerformAction):
+    Action              | super_admin | hotel_admin
+    --------------------+-------------+------------
+    view_all_hotels     |     YES     |    no
+    edit_all_hotels     |     YES     |    no
+    view_all_bookings   |     YES     |    no
+    manage_users        |     YES     |    no
+    view_analytics      |     YES     |    no
+    access own hotels   |     YES     |    YES (hotel_ids only)
+
+  Helper functions (lib/utils/roles.ts):
+    isSuperAdmin, isHotelAdmin, isAnyAdmin, getAdminRole, getUserHotelIds (null = all hotels),
+    hasHotelAccess, getRoleDisplayName, canPerformAction
+
+  Server guards (lib/utils/admin.ts):
+    isAdmin, checkIsSuperAdmin, checkIsHotelAdmin, getAdminUser, requireAdmin, requireSuperAdmin,
+    requireHotelAdmin, getAdminHotelAccess -> { userId, role, hotelIds }, checkHotelAccess,
+    requireHotelAccess(hotelId)
+
+B) DATABASE ROLE-CHECK FUNCTIONS (SECURITY DEFINER, used in RLS policies)
+----------------------------------------------------------------------------------------------------
+  public.is_admin()        -> true if role IN ('super_admin','admin','hotel_admin')
+  public.is_super_admin()  -> true if role IN ('super_admin','admin')
+  public.is_hotel_admin()  -> true if role = 'hotel_admin'
+  public.handle_new_user() -> trigger on auth.users: upserts public.profiles (id, email, role, hotel_ids)
+  Some policies also check auth.jwt() ->> 'role' directly.
+
+C) POSTGRES / SUPABASE ROLES (roles.sql)
+----------------------------------------------------------------------------------------------------
+  anon           -> unauthenticated API requests   (statement_timeout = 3s)
+  authenticated  -> logged-in API requests         (statement_timeout = 8s)
+  authenticator  -> PostgREST connection role      (statement_timeout = 8s)
+  service_role   -> server-side key, bypasses RLS (GRANT ALL on tables)
+  postgres       -> owner of all functions/tables
+
+====================================================================================================
+SECTION 1: TABLES (schema: public) — 48 tables
+====================================================================================================
+
+### TABLE: amenities   [RLS: disabled]
+    Columns:
+      - id uuid DEFAULT extensions.uuid_generate_v4() NOT NULL
+      - category_id uuid
+      - name character varying(100) NOT NULL
+      - icon character varying(100)
+      - display_order integer DEFAULT 0
+      - created_at timestamp with time zone DEFAULT now()
+    Primary key:
+      - PRIMARY KEY (id)
+    Foreign keys:
+      - amenities_category_id_fkey: FOREIGN KEY (category_id) REFERENCES amenity_categories(id) ON DELETE SET NULL
+
+### TABLE: amenity_categories   [RLS: disabled]
+    Columns:
+      - id uuid DEFAULT extensions.uuid_generate_v4() NOT NULL
+      - name character varying(100) NOT NULL
+      - icon character varying(100)
+      - display_order integer DEFAULT 0
+      - created_at timestamp with time zone DEFAULT now()
+    Primary key:
+      - PRIMARY KEY (id)
+
+### TABLE: blog_images   [RLS: ENABLED]
+    Columns:
+      - id uuid DEFAULT extensions.uuid_generate_v4() NOT NULL
+      - blog_id uuid
+      - image_url text NOT NULL
+      - storage_path text NOT NULL
+      - alt_text character varying(255)
+      - caption text
+      - display_order integer DEFAULT 0
+      - created_at timestamp with time zone DEFAULT now()
+    Primary key:
+      - PRIMARY KEY (id)
+    Foreign keys:
+      - blog_images_blog_id_fkey: FOREIGN KEY (blog_id) REFERENCES blogs(id) ON DELETE CASCADE
+    RLS policies:
+      - "blog_images_public_view" FOR SELECT USING ((EXISTS ( SELECT 1 FROM public.blogs WHERE ((blogs.id = blog_images.blog_id) AND ((blogs.status) = 'published')))))
+      - "blog_images_super_admin_all" USING (public.is_super_admin()) WITH CHECK (public.is_super_admin())
+
+### TABLE: blogs   [RLS: ENABLED]
+    Comment: Blog posts with rich text content
+    Columns:
+      - id uuid DEFAULT extensions.uuid_generate_v4() NOT NULL
+      - title character varying(500) NOT NULL
+      - slug character varying(500) NOT NULL    -- URL-friendly identifier for the blog post
+      - excerpt text
+      - content text NOT NULL    -- Rich text HTML content from editor
+      - featured_image text    -- Main image URL for the blog post
+      - author_id uuid NOT NULL
+      - status character varying(20) DEFAULT 'draft'::character varying    -- Post status: draft, published, or archived
+      - published_at timestamp with time zone
+      - meta_title character varying(200)
+      - meta_description character varying(500)
+      - tags text[]    -- Array of tags for categorization
+      - view_count integer DEFAULT 0
+      - created_at timestamp with time zone DEFAULT now()
+      - updated_at timestamp with time zone DEFAULT now()
+    Primary key:
+      - PRIMARY KEY (id)
+    Unique:
+      - blogs_slug_key: UNIQUE (slug)
+    Foreign keys:
+      - blogs_author_id_fkey: FOREIGN KEY (author_id) REFERENCES auth.users(id) ON DELETE SET NULL
+    Check constraints:
+      - CONSTRAINT blogs_status_check CHECK (((status)::text = ANY ((ARRAY['draft'::character varying, 'published'::character varying, 'archived'::character varying])::text[])))
+    RLS policies:
+      - "blogs_public_view" FOR SELECT USING (((status) = 'published'))
+      - "blogs_super_admin_all" USING (public.is_super_admin()) WITH CHECK (public.is_super_admin())
+
+### TABLE: boat_amenities   [RLS: ENABLED]
+    Columns:
+      - id uuid DEFAULT gen_random_uuid() NOT NULL
+      - boat_id uuid NOT NULL
+      - amenity_id uuid NOT NULL
+      - is_free boolean DEFAULT true
+      - additional_charge numeric(10,2)
+    Primary key:
+      - PRIMARY KEY (id)
+    Unique:
+      - boat_amenities_boat_id_amenity_id_key: UNIQUE (boat_id, amenity_id)
+    Foreign keys:
+      - boat_amenities_amenity_id_fkey: FOREIGN KEY (amenity_id) REFERENCES amenities(id)
+      - boat_amenities_boat_id_fkey: FOREIGN KEY (boat_id) REFERENCES boats(id) ON DELETE CASCADE
+    RLS policies:
+      - "Admins can manage boat amenities" USING (((auth.jwt() ->> 'role') = ANY (ARRAY['super_admin', 'admin', 'hotel_admin'])))
+      - "Public can read boat amenities" FOR SELECT USING (true)
+
+### TABLE: boat_bookings   [RLS: ENABLED]
+    Columns:
+      - id uuid DEFAULT gen_random_uuid() NOT NULL
+      - booking_reference text NOT NULL
+      - user_id uuid
+      - boat_id uuid NOT NULL
+      - trip_type_id uuid NOT NULL
+      - time_slot_id uuid NOT NULL
+      - trip_date date NOT NULL
+      - num_adults integer DEFAULT 1 NOT NULL
+      - num_children integer DEFAULT 0 NOT NULL
+      - guest_first_name text NOT NULL
+      - guest_last_name text NOT NULL
+      - guest_email text NOT NULL
+      - guest_phone text NOT NULL
+      - pricing_model text NOT NULL
+      - price_per_person numeric(10,2)
+      - price_per_boat numeric(10,2)
+      - child_price_per_person numeric(10,2)
+      - subtotal numeric(10,2) NOT NULL
+      - tax_amount numeric(10,2) DEFAULT 0 NOT NULL
+      - tax_percentage numeric(5,2) DEFAULT 12
+      - service_fee numeric(10,2) DEFAULT 0 NOT NULL
+      - discount_amount numeric(10,2) DEFAULT 0 NOT NULL
+      - total_amount numeric(10,2) NOT NULL
+      - currency text DEFAULT 'INR'::text NOT NULL
+      - booking_status text DEFAULT 'pending'::text NOT NULL
+      - payment_status text DEFAULT 'pending'::text NOT NULL
+      - payment_method text
+      - payment_transaction_id text
+      - special_requests text
+      - cancellation_reason text
+      - cancelled_at timestamp with time zone
+      - booking_source text DEFAULT 'web'::text
+      - created_at timestamp with time zone DEFAULT now()
+      - updated_at timestamp with time zone DEFAULT now()
+    Primary key:
+      - PRIMARY KEY (id)
+    Unique:
+      - boat_bookings_booking_reference_key: UNIQUE (booking_reference)
+    Foreign keys:
+      - boat_bookings_boat_id_fkey: FOREIGN KEY (boat_id) REFERENCES boats(id)
+      - boat_bookings_time_slot_id_fkey: FOREIGN KEY (time_slot_id) REFERENCES trip_time_slots(id)
+      - boat_bookings_trip_type_id_fkey: FOREIGN KEY (trip_type_id) REFERENCES trip_types(id)
+      - boat_bookings_user_id_fkey: FOREIGN KEY (user_id) REFERENCES auth.users(id)
+    Check constraints:
+      - CONSTRAINT boat_bookings_booking_status_check CHECK ((booking_status = ANY (ARRAY['pending'::text, 'confirmed'::text, 'cancelled'::text, 'completed'::text, 'no_show'::text])))
+      - CONSTRAINT boat_bookings_payment_status_check CHECK ((payment_status = ANY (ARRAY['pending'::text, 'processing'::text, 'paid'::text, 'failed'::text, 'refunded'::text])))
+      - CONSTRAINT boat_bookings_pricing_model_check CHECK ((pricing_model = ANY (ARRAY['per_person'::text, 'per_boat'::text])))
+    RLS policies:
+      - "Admins can manage boat bookings" USING (((auth.jwt() ->> 'role') = ANY (ARRAY['super_admin', 'admin', 'hotel_admin'])))
+      - "Users can insert boat bookings" FOR INSERT WITH CHECK (true)
+      - "Users can read own boat bookings" FOR SELECT USING ((auth.uid() = user_id))
+      - "Users can update own boat bookings" FOR UPDATE USING ((auth.uid() = user_id)) WITH CHECK ((auth.uid() = user_id))
+
+### TABLE: boat_images   [RLS: ENABLED]
+    Columns:
+      - id uuid DEFAULT gen_random_uuid() NOT NULL
+      - boat_id uuid NOT NULL
+      - image_url text NOT NULL
+      - storage_path text
+      - alt_text text DEFAULT ''::text
+      - is_primary boolean DEFAULT false
+      - display_order integer DEFAULT 0
+      - created_at timestamp with time zone DEFAULT now()
+    Primary key:
+      - PRIMARY KEY (id)
+    Foreign keys:
+      - boat_images_boat_id_fkey: FOREIGN KEY (boat_id) REFERENCES boats(id) ON DELETE CASCADE
+    RLS policies:
+      - "Admins can manage boat images" USING (((auth.jwt() ->> 'role') = ANY (ARRAY['super_admin', 'admin', 'hotel_admin'])))
+      - "Public can read boat images" FOR SELECT USING (true)
+
+### TABLE: boat_reviews   [RLS: ENABLED]
+    Columns:
+      - id uuid DEFAULT gen_random_uuid() NOT NULL
+      - boat_id uuid NOT NULL
+      - boat_booking_id uuid NOT NULL
+      - user_id uuid NOT NULL
+      - overall_rating numeric(3,1) NOT NULL
+      - safety_rating numeric(3,1)
+      - crew_rating numeric(3,1)
+      - experience_rating numeric(3,1)
+      - value_rating numeric(3,1)
+      - title text
+      - comment text
+      - trip_date date
+      - is_verified boolean DEFAULT true
+      - status text DEFAULT 'pending'::text NOT NULL
+      - created_at timestamp with time zone DEFAULT now()
+      - updated_at timestamp with time zone DEFAULT now()
+      - image_urls text[] DEFAULT '{}'::text[]
+    Primary key:
+      - PRIMARY KEY (id)
+    Foreign keys:
+      - boat_reviews_boat_booking_id_fkey: FOREIGN KEY (boat_booking_id) REFERENCES boat_bookings(id)
+      - boat_reviews_boat_id_fkey: FOREIGN KEY (boat_id) REFERENCES boats(id)
+      - boat_reviews_user_id_fkey: FOREIGN KEY (user_id) REFERENCES auth.users(id)
+    Check constraints:
+      - CONSTRAINT boat_reviews_overall_rating_check CHECK (((overall_rating >= (0)::numeric) AND (overall_rating <= (10)::numeric)))
+      - CONSTRAINT boat_reviews_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'approved'::text, 'rejected'::text])))
+    RLS policies:
+      - "Admins can manage boat reviews" USING (((auth.jwt() ->> 'role') = ANY (ARRAY['super_admin', 'admin', 'hotel_admin'])))
+      - "Public can read approved boat reviews" FOR SELECT USING ((status = 'approved'))
+      - "Users can insert boat reviews" FOR INSERT WITH CHECK ((auth.uid() = user_id))
+
+### TABLE: boats   [RLS: ENABLED]
+    Columns:
+      - id uuid DEFAULT gen_random_uuid() NOT NULL
+      - name text NOT NULL
+      - slug text NOT NULL
+      - description text
+      - boat_type text DEFAULT 'motorboat'::text NOT NULL
+      - capacity integer DEFAULT 10 NOT NULL
+      - owner_id uuid
+      - address_line_1 text
+      - city text DEFAULT 'Honnavar'::text NOT NULL
+      - state text DEFAULT 'Karnataka'::text NOT NULL
+      - country text DEFAULT 'India'::text NOT NULL
+      - latitude numeric(10,8)
+      - longitude numeric(11,8)
+      - departure_point text
+      - phone text
+      - email text
+      - cancellation_policy_text text
+      - safety_info_text text
+      - status text DEFAULT 'active'::text NOT NULL
+      - created_at timestamp with time zone DEFAULT now()
+      - updated_at timestamp with time zone DEFAULT now()
+    Primary key:
+      - PRIMARY KEY (id)
+    Unique:
+      - boats_slug_key: UNIQUE (slug)
+    Foreign keys:
+      - boats_owner_id_fkey: FOREIGN KEY (owner_id) REFERENCES auth.users(id)
+    Check constraints:
+      - CONSTRAINT boats_boat_type_check CHECK ((boat_type = ANY (ARRAY['motorboat'::text, 'sailboat'::text, 'speedboat'::text, 'houseboat'::text, 'kayak'::text, 'ferry'::text])))
+      - CONSTRAINT boats_status_check CHECK ((status = ANY (ARRAY['active'::text, 'inactive'::text, 'pending'::text])))
+    RLS policies:
+      - "Admins can manage boats" USING (((auth.jwt() ->> 'role') = ANY (ARRAY['super_admin', 'admin', 'hotel_admin'])))
+      - "Public can read active boats" FOR SELECT USING ((status = 'active'))
+
+### TABLE: booking_meal_plans   [RLS: ENABLED]
+    Columns:
+      - id uuid DEFAULT gen_random_uuid() NOT NULL
+      - booking_id uuid NOT NULL
+      - meal_plan_id uuid NOT NULL
+      - meal_type text NOT NULL
+      - name text NOT NULL
+      - price_per_person numeric(10,2) NOT NULL
+      - num_guests integer NOT NULL
+      - num_nights integer NOT NULL
+      - total_amount numeric(10,2) NOT NULL
+      - created_at timestamp with time zone DEFAULT now()
+    Primary key:
+      - PRIMARY KEY (id)
+    Foreign keys:
+      - booking_meal_plans_booking_id_fkey: FOREIGN KEY (booking_id) REFERENCES bookings(id) ON DELETE CASCADE
+      - booking_meal_plans_meal_plan_id_fkey: FOREIGN KEY (meal_plan_id) REFERENCES meal_plans(id)
+    RLS policies:
+      - "Admins can read all booking meal plans" FOR SELECT USING (public.is_admin())
+      - "Service role can insert booking meal plans" FOR INSERT WITH CHECK (true)
+      - "Users can read own booking meal plans" FOR SELECT USING ((EXISTS ( SELECT 1 FROM public.bookings WHERE ((bookings.id = booking_meal_plans.booking_id) AND (bookings.user_id = auth.uid())))))
+
+### TABLE: bookings   [RLS: ENABLED]
+    Columns:
+      - id uuid DEFAULT gen_random_uuid() NOT NULL
+      - user_id uuid
+      - guest_email character varying(255) NOT NULL
+      - guest_first_name character varying(100) NOT NULL
+      - guest_last_name character varying(100) NOT NULL
+      - guest_phone character varying(20) NOT NULL
+      - hotel_id uuid NOT NULL
+      - room_type_id uuid NOT NULL
+      - check_in_date date NOT NULL
+      - check_out_date date NOT NULL
+      - num_nights integer
+      - num_adults integer NOT NULL
+      - num_children integer DEFAULT 0
+      - num_rooms integer DEFAULT 1
+      - price_per_night numeric(10,2) NOT NULL
+      - subtotal numeric(10,2)
+      - tax_amount numeric(10,2) DEFAULT 0
+      - service_fee numeric(10,2) DEFAULT 0
+      - total_amount numeric(10,2) NOT NULL
+      - payment_status character varying(20) DEFAULT 'pending'::character varying
+      - payment_method character varying(50)
+      - payment_transaction_id character varying(255)
+      - booking_status character varying(20) DEFAULT 'pending'::character varying
+      - booking_reference character varying(20) NOT NULL
+      - special_requests text
+      - cancelled_at timestamp with time zone
+      - cancellation_reason text
+      - created_at timestamp with time zone DEFAULT now()
+      - updated_at timestamp with time zone DEFAULT now()
+      - razorpay_order_id character varying(255)
+      - razorpay_payment_id character varying(255)
+      - meal_plan_total numeric(10,2) DEFAULT 0
+      - extra_bed_charge numeric(10,2) DEFAULT 0
+    Primary key:
+      - PRIMARY KEY (id)
+    Unique:
+      - bookings_booking_reference_key: UNIQUE (booking_reference)
+    Foreign keys:
+      - bookings_hotel_id_fkey: FOREIGN KEY (hotel_id) REFERENCES hotels(id) ON DELETE CASCADE
+      - bookings_room_type_id_fkey: FOREIGN KEY (room_type_id) REFERENCES room_types(id) ON DELETE CASCADE
+      - bookings_user_id_fkey: FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE SET NULL
+    Check constraints:
+      - CONSTRAINT bookings_booking_status_check CHECK (((booking_status)::text = ANY ((ARRAY['pending'::character varying, 'confirmed'::character varying, 'cancelled'::character varying, 'completed'::character varying, 'no_show'::character varying])::text[])))
+      - CONSTRAINT bookings_num_adults_check CHECK ((num_adults >= 1))
+      - CONSTRAINT bookings_num_children_check CHECK ((num_children >= 0))
+      - CONSTRAINT bookings_num_rooms_check CHECK ((num_rooms >= 1))
+      - CONSTRAINT bookings_payment_status_check CHECK (((payment_status)::text = ANY ((ARRAY['pending'::character varying, 'paid'::character varying, 'failed'::character varying, 'refunded'::character varying])::text[])))
+      - CONSTRAINT valid_dates CHECK ((check_out_date > check_in_date))
+      - CONSTRAINT valid_total CHECK ((total_amount >= (0)::numeric))
+    RLS policies:
+      - "Users can create own bookings" FOR INSERT WITH CHECK (((auth.uid() = user_id) OR (user_id IS NULL)))
+      - "Users can update own bookings" FOR UPDATE USING ((auth.uid() = user_id))
+      - "Users can view own bookings" FOR SELECT USING (((auth.uid() = user_id) OR (user_id IS NULL)))
+      - "bookings_admin_own_hotel" FOR SELECT USING (((EXISTS ( SELECT 1 FROM public.hotels WHERE ((hotels.id = bookings.hotel_id) AND (hotels.owner_id = auth.uid())))) AND public.is_hotel_admin()))
+      - "bookings_hotel_admin_update" FOR UPDATE USING ((public.is_hotel_admin() AND (EXISTS ( SELECT 1 FROM public.hotels WHERE ((hotels.id = bookings.hotel_id) AND (hotels.owner_id = auth.uid()))))))
+      - "bookings_super_admin_all" FOR SELECT USING (public.is_super_admin())
+      - "bookings_super_admin_update" FOR UPDATE USING (public.is_super_admin())
+      - "bookings_user_own" USING ((user_id = auth.uid()))
+
+### TABLE: cancellation_policies   [RLS: disabled]
+    Columns:
+      - id uuid DEFAULT extensions.uuid_generate_v4() NOT NULL
+      - hotel_id uuid NOT NULL
+      - room_type_id uuid
+      - policy_name character varying(255) NOT NULL
+      - free_cancellation_hours integer
+      - cancellation_charge_percentage numeric(5,2)
+      - no_show_charge_percentage numeric(5,2)
+      - valid_from date
+      - valid_to date
+      - is_active boolean DEFAULT true
+      - created_at timestamp with time zone DEFAULT now()
+    Primary key:
+      - PRIMARY KEY (id)
+    Foreign keys:
+      - cancellation_policies_hotel_id_fkey: FOREIGN KEY (hotel_id) REFERENCES hotels(id) ON DELETE CASCADE
+      - cancellation_policies_room_type_id_fkey: FOREIGN KEY (room_type_id) REFERENCES room_types(id) ON DELETE CASCADE
+
+### TABLE: child_policies   [RLS: disabled]
+    Columns:
+      - id uuid DEFAULT extensions.uuid_generate_v4() NOT NULL
+      - hotel_id uuid NOT NULL
+      - children_allowed boolean DEFAULT true
+      - age_charged_as_adult integer
+      - extra_bed_available boolean DEFAULT false
+      - crib_available boolean DEFAULT false
+      - extra_bed_charge numeric(10,2)
+      - crib_charge numeric(10,2)
+      - created_at timestamp with time zone DEFAULT now()
+      - updated_at timestamp with time zone DEFAULT now()
+    Primary key:
+      - PRIMARY KEY (id)
+    Foreign keys:
+      - child_policies_hotel_id_fkey: FOREIGN KEY (hotel_id) REFERENCES hotels(id) ON DELETE CASCADE
+
+### TABLE: faqs   [RLS: disabled]
+    Columns:
+      - id uuid DEFAULT extensions.uuid_generate_v4() NOT NULL
+      - hotel_id uuid
+      - question text NOT NULL
+      - answer text NOT NULL
+      - category character varying(50)
+      - display_order integer DEFAULT 0
+      - is_active boolean DEFAULT true
+      - created_at timestamp with time zone DEFAULT now()
+      - updated_at timestamp with time zone DEFAULT now()
+    Primary key:
+      - PRIMARY KEY (id)
+    Foreign keys:
+      - faqs_hotel_id_fkey: FOREIGN KEY (hotel_id) REFERENCES hotels(id) ON DELETE CASCADE
+    Check constraints:
+      - CONSTRAINT faqs_category_check CHECK (((category)::text = ANY ((ARRAY['breakfast'::character varying, 'parking'::character varying, 'spa'::character varying, 'swimming_pool'::character varying, 'wifi'::character varying, 'check_in_out'::character varying, 'payment'::character varying, 'general'::character varying])::text[])))
+
+### TABLE: hotel_admin_permissions   [RLS: disabled]
+    Columns:
+      - permission_key text NOT NULL
+      - enabled boolean DEFAULT true NOT NULL
+      - requires_approval boolean DEFAULT false NOT NULL
+      - updated_at timestamp with time zone DEFAULT now() NOT NULL
+    Primary key:
+      - PRIMARY KEY (permission_key)
+
+### TABLE: hotel_amenities   [RLS: ENABLED]
+    Columns:
+      - id uuid DEFAULT extensions.uuid_generate_v4() NOT NULL
+      - hotel_id uuid NOT NULL
+      - amenity_id uuid NOT NULL
+      - is_free boolean DEFAULT true
+      - additional_charge numeric(10,2)
+      - created_at timestamp with time zone DEFAULT now()
+    Primary key:
+      - PRIMARY KEY (id)
+    Unique:
+      - hotel_amenities_hotel_id_amenity_id_key: UNIQUE (hotel_id, amenity_id)
+    Foreign keys:
+      - hotel_amenities_amenity_id_fkey: FOREIGN KEY (amenity_id) REFERENCES amenities(id) ON DELETE CASCADE
+      - hotel_amenities_hotel_id_fkey: FOREIGN KEY (hotel_id) REFERENCES hotels(id) ON DELETE CASCADE
+    RLS policies:
+      - "hotel_amenities_admin_own" USING (((EXISTS ( SELECT 1 FROM public.hotels WHERE ((hotels.id = hotel_amenities.hotel_id) AND (hotels.owner_id = auth.uid())))) AND public.is_hotel_admin())) WITH CHECK (((EXISTS ( SELECT 1 FROM public.hotels WHERE ((hotels.id = hotel_amenities.hotel_id) AND (hotels.owner_id = auth.uid())))) AND public.is_hotel_admin()))
+      - "hotel_amenities_public_view" FOR SELECT USING ((EXISTS ( SELECT 1 FROM public.hotels WHERE ((hotels.id = hotel_amenities.hotel_id) AND ((hotels.status) = 'active')))))
+      - "hotel_amenities_super_admin_all" USING (public.is_super_admin())
+
+### TABLE: hotel_images   [RLS: ENABLED]
+    Columns:
+      - id uuid DEFAULT extensions.uuid_generate_v4() NOT NULL
+      - hotel_id uuid NOT NULL
+      - image_url text NOT NULL
+      - alt_text character varying(255)
+      - is_primary boolean DEFAULT false
+      - display_order integer DEFAULT 0
+      - created_at timestamp with time zone DEFAULT now()
+      - storage_path text    -- Path to the image file in Supabase Storage (e.g., hotel-id/filename.jpg)
+    Primary key:
+      - PRIMARY KEY (id)
+    Foreign keys:
+      - hotel_images_hotel_id_fkey: FOREIGN KEY (hotel_id) REFERENCES hotels(id) ON DELETE CASCADE
+    RLS policies:
+      - "hotel_images_admin_own" USING (((EXISTS ( SELECT 1 FROM public.hotels WHERE ((hotels.id = hotel_images.hotel_id) AND (hotels.owner_id = auth.uid())))) AND public.is_hotel_admin())) WITH CHECK (((EXISTS ( SELECT 1 FROM public.hotels WHERE ((hotels.id = hotel_images.hotel_id) AND (hotels.owner_id = auth.uid())))) AND public.is_hotel_admin()))
+      - "hotel_images_public_view" FOR SELECT USING ((EXISTS ( SELECT 1 FROM public.hotels WHERE ((hotels.id = hotel_images.hotel_id) AND ((hotels.status) = 'active')))))
+      - "hotel_images_super_admin_all" USING (public.is_super_admin())
+
+### TABLE: hotel_languages   [RLS: disabled]
+    Columns:
+      - id uuid DEFAULT extensions.uuid_generate_v4() NOT NULL
+      - hotel_id uuid NOT NULL
+      - language_id uuid NOT NULL
+      - created_at timestamp with time zone DEFAULT now()
+    Primary key:
+      - PRIMARY KEY (id)
+    Unique:
+      - hotel_languages_hotel_id_language_id_key: UNIQUE (hotel_id, language_id)
+    Foreign keys:
+      - hotel_languages_hotel_id_fkey: FOREIGN KEY (hotel_id) REFERENCES hotels(id) ON DELETE CASCADE
+      - hotel_languages_language_id_fkey: FOREIGN KEY (language_id) REFERENCES languages(id) ON DELETE CASCADE
+
+### TABLE: hotel_nearby_attractions   [RLS: disabled]
+    Columns:
+      - id uuid DEFAULT extensions.uuid_generate_v4() NOT NULL
+      - hotel_id uuid NOT NULL
+      - attraction_id uuid NOT NULL
+      - distance_meters integer
+      - distance_text character varying(50)
+      - created_at timestamp with time zone DEFAULT now()
+    Primary key:
+      - PRIMARY KEY (id)
+    Unique:
+      - hotel_nearby_attractions_hotel_id_attraction_id_key: UNIQUE (hotel_id, attraction_id)
+    Foreign keys:
+      - hotel_nearby_attractions_attraction_id_fkey: FOREIGN KEY (attraction_id) REFERENCES nearby_attractions(id) ON DELETE CASCADE
+      - hotel_nearby_attractions_hotel_id_fkey: FOREIGN KEY (hotel_id) REFERENCES hotels(id) ON DELETE CASCADE
+
+### TABLE: hotel_payment_methods   [RLS: disabled]
+    Columns:
+      - id uuid DEFAULT extensions.uuid_generate_v4() NOT NULL
+      - hotel_id uuid NOT NULL
+      - payment_method_id uuid NOT NULL
+      - is_accepted boolean DEFAULT true
+      - created_at timestamp with time zone DEFAULT now()
+    Primary key:
+      - PRIMARY KEY (id)
+    Unique:
+      - hotel_payment_methods_hotel_id_payment_method_id_key: UNIQUE (hotel_id, payment_method_id)
+    Foreign keys:
+      - hotel_payment_methods_hotel_id_fkey: FOREIGN KEY (hotel_id) REFERENCES hotels(id) ON DELETE CASCADE
+      - hotel_payment_methods_payment_method_id_fkey: FOREIGN KEY (payment_method_id) REFERENCES payment_methods(id) ON DELETE CASCADE
+
+### TABLE: hotel_property_highlights   [RLS: disabled]
+    Columns:
+      - id uuid DEFAULT extensions.uuid_generate_v4() NOT NULL
+      - hotel_id uuid NOT NULL
+      - highlight_type character varying(50)
+      - title character varying(255) NOT NULL
+      - description text
+      - icon character varying(100)
+      - display_order integer DEFAULT 0
+      - created_at timestamp with time zone DEFAULT now()
+    Primary key:
+      - PRIMARY KEY (id)
+    Foreign keys:
+      - hotel_property_highlights_hotel_id_fkey: FOREIGN KEY (hotel_id) REFERENCES hotels(id) ON DELETE CASCADE
+    Check constraints:
+      - CONSTRAINT hotel_property_highlights_highlight_type_check CHECK (((highlight_type)::text = ANY ((ARRAY['perfect_for_stay'::character varying, 'loyal_customers'::character varying, 'top_location'::character varying, 'great_value'::character varying, 'excellent_service'::character varying])::text[])))
+
+### TABLE: hotels   [RLS: ENABLED]
+    Columns:
+      - id uuid DEFAULT extensions.uuid_generate_v4() NOT NULL
+      - name character varying(255) NOT NULL
+      - slug character varying(255) NOT NULL
+      - description text
+      - star_rating integer
+      - property_type character varying(50) DEFAULT 'hotel'::character varying
+      - chain_brand character varying(100)
+      - address_line_1 character varying(255) NOT NULL
+      - address_line_2 character varying(255)
+      - city character varying(100) NOT NULL
+      - state character varying(100) NOT NULL
+      - country character varying(100) NOT NULL
+      - postal_code character varying(20)
+      - latitude numeric(10,8)
+      - longitude numeric(11,8)
+      - location_rating numeric(3,1)
+      - phone character varying(20)
+      - email character varying(255)
+      - website text
+      - check_in_from_time time without time zone
+      - check_in_to_time time without time zone
+      - check_out_time time without time zone
+      - advance_notice_required boolean DEFAULT false
+      - minimum_age_check_in integer DEFAULT 18
+      - cancellation_policy_text text
+      - child_policy_text text
+      - extra_bed_policy_text text
+      - pet_policy_text text
+      - smoking_allowed boolean DEFAULT false
+      - parking_available boolean DEFAULT false
+      - parking_type character varying(20)
+      - parking_free boolean DEFAULT false
+      - is_genius_discount_available boolean DEFAULT false
+      - status character varying(20) DEFAULT 'active'::character varying
+      - created_at timestamp with time zone DEFAULT now()
+      - updated_at timestamp with time zone DEFAULT now()
+      - owner_id uuid    -- Reference to the user who owns/manages this hotel (hotel_admin role)
+      - maps_embed_url text
+      - inventory_source text DEFAULT 'manual'::text NOT NULL
+    Primary key:
+      - PRIMARY KEY (id)
+    Unique:
+      - hotels_slug_key: UNIQUE (slug)
+    Foreign keys:
+      - hotels_owner_id_fkey: FOREIGN KEY (owner_id) REFERENCES auth.users(id) ON DELETE SET NULL
+    Check constraints:
+      - CONSTRAINT hotels_inventory_source_check CHECK ((inventory_source = ANY (ARRAY['manual'::text, 'api'::text])))
+      - CONSTRAINT hotels_location_rating_check CHECK (((location_rating >= (0)::numeric) AND (location_rating <= (10)::numeric)))
+      - CONSTRAINT hotels_parking_type_check CHECK (((parking_type)::text = ANY ((ARRAY['on-site'::character varying, 'off-site'::character varying, 'none'::character varying])::text[])))
+      - CONSTRAINT hotels_property_type_check CHECK (((property_type)::text = ANY ((ARRAY['hotel'::character varying, 'apartment'::character varying, 'resort'::character varying, 'villa'::character varying, 'guesthouse'::character varying, 'hostel'::character varying, 'motel'::character varying, 'homestay'::character varying])::text[])))
+      - CONSTRAINT hotels_star_rating_check CHECK (((star_rating >= 1) AND (star_rating <= 5)))
+      - CONSTRAINT hotels_status_check CHECK (((status)::text = ANY ((ARRAY['active'::character varying, 'inactive'::character varying, 'pending'::character varying, 'archived'::character varying])::text[])))
+    RLS policies:
+      - "hotels_admin_own" USING (((owner_id = auth.uid()) AND public.is_hotel_admin())) WITH CHECK (((owner_id = auth.uid()) AND public.is_hotel_admin()))
+      - "hotels_public_view" FOR SELECT USING (((status) = 'active'))
+      - "hotels_super_admin_all" USING (public.is_super_admin())
+
+### TABLE: languages   [RLS: disabled]
+    Columns:
+      - id uuid DEFAULT extensions.uuid_generate_v4() NOT NULL
+      - code character varying(5) NOT NULL
+      - name character varying(100) NOT NULL
+      - is_active boolean DEFAULT true
+      - created_at timestamp with time zone DEFAULT now()
+    Primary key:
+      - PRIMARY KEY (id)
+    Unique:
+      - languages_code_key: UNIQUE (code)
+
+### TABLE: meal_plans   [RLS: ENABLED]
+    Columns:
+      - id uuid DEFAULT gen_random_uuid() NOT NULL
+      - hotel_id uuid NOT NULL
+      - meal_type text NOT NULL
+      - name text NOT NULL
+      - description text
+      - price_per_person numeric(10,2) DEFAULT 0 NOT NULL
+      - status text DEFAULT 'active'::text NOT NULL
+      - created_at timestamp with time zone DEFAULT now()
+      - updated_at timestamp with time zone DEFAULT now()
+      - child_price_per_person numeric(10,2)
+    Primary key:
+      - PRIMARY KEY (id)
+    Foreign keys:
+      - meal_plans_hotel_id_fkey: FOREIGN KEY (hotel_id) REFERENCES hotels(id) ON DELETE CASCADE
+    Check constraints:
+      - CONSTRAINT meal_plans_meal_type_check CHECK ((meal_type = ANY (ARRAY['breakfast'::text, 'lunch'::text, 'dinner'::text])))
+      - CONSTRAINT meal_plans_status_check CHECK ((status = ANY (ARRAY['active'::text, 'inactive'::text])))
+    RLS policies:
+      - "Admins can manage meal plans" USING ((public.is_super_admin() OR (public.is_hotel_admin() AND ((hotel_id) = ANY (ARRAY( SELECT jsonb_array_elements_text(((auth.jwt() -> 'user_metadata') -> 'hotel_ids')) AS jsonb_array_elements_text))))))
+      - "Anyone can read active meal plans" FOR SELECT USING ((status = 'active'))
+
+### TABLE: nearby_attractions   [RLS: disabled]
+    Columns:
+      - id uuid DEFAULT extensions.uuid_generate_v4() NOT NULL
+      - name character varying(255) NOT NULL
+      - category character varying(50)
+      - latitude numeric(10,8)
+      - longitude numeric(11,8)
+      - description text
+      - created_at timestamp with time zone DEFAULT now()
+    Primary key:
+      - PRIMARY KEY (id)
+    Check constraints:
+      - CONSTRAINT nearby_attractions_category_check CHECK (((category)::text = ANY ((ARRAY['restaurant'::character varying, 'attraction'::character varying, 'natural_beauty'::character varying, 'public_transit'::character varying, 'airport'::character varying, 'shopping'::character varying, 'entertainment'::character varying])::text[])))
+
+### TABLE: notifications   [RLS: disabled]
+    Columns:
+      - id uuid DEFAULT extensions.uuid_generate_v4() NOT NULL
+      - user_id uuid NOT NULL
+      - type character varying(50)
+      - title character varying(255) NOT NULL
+      - message text NOT NULL
+      - is_read boolean DEFAULT false
+      - created_at timestamp with time zone DEFAULT now()
+    Primary key:
+      - PRIMARY KEY (id)
+    Check constraints:
+      - CONSTRAINT notifications_type_check CHECK (((type)::text = ANY ((ARRAY['booking_confirmation'::character varying, 'reminder'::character varying, 'promotion'::character varying, 'review_request'::character varying, 'cancellation'::character varying])::text[])))
+
+### TABLE: payment_anomalies   [RLS: ENABLED]
+    Comment: Logs payment anomalies for admin review and fraud detection
+    Columns:
+      - id uuid DEFAULT extensions.uuid_generate_v4() NOT NULL
+      - booking_id uuid
+      - payment_id character varying(255)
+      - anomaly_type character varying(50)
+      - details jsonb
+      - severity character varying(20) DEFAULT 'medium'::character varying
+      - status character varying(20) DEFAULT 'pending_review'::character varying
+      - resolution_notes text
+      - resolved_by uuid
+      - resolved_at timestamp with time zone
+      - created_at timestamp with time zone DEFAULT now()
+    Primary key:
+      - PRIMARY KEY (id)
+    Foreign keys:
+      - payment_anomalies_booking_id_fkey: FOREIGN KEY (booking_id) REFERENCES bookings(id) ON DELETE SET NULL
+    Check constraints:
+      - CONSTRAINT payment_anomalies_anomaly_type_check CHECK (((anomaly_type)::text = ANY ((ARRAY['amount_mismatch'::character varying, 'duplicate_payment'::character varying, 'refund_failed'::character varying, 'signature_mismatch'::character varying, 'suspicious_activity'::character varying, 'other'::character varying])::text[])))
+      - CONSTRAINT payment_anomalies_severity_check CHECK (((severity)::text = ANY ((ARRAY['low'::character varying, 'medium'::character varying, 'high'::character varying, 'critical'::character varying])::text[])))
+      - CONSTRAINT payment_anomalies_status_check CHECK (((status)::text = ANY ((ARRAY['pending_review'::character varying, 'investigating'::character varying, 'resolved'::character varying, 'false_positive'::character varying])::text[])))
+    RLS policies:
+      - "Only admins can access payment anomalies" USING (public.is_super_admin())
+
+### TABLE: payment_audit_log   [RLS: ENABLED]
+    Comment: Complete audit trail of all payment-related events for compliance
+    Columns:
+      - id uuid DEFAULT extensions.uuid_generate_v4() NOT NULL
+      - booking_id uuid
+      - payment_id uuid
+      - event_type character varying(50) NOT NULL
+      - event_source character varying(50)
+      - payload jsonb
+      - user_id uuid
+      - ip_address inet
+      - user_agent text
+      - success boolean
+      - error_message text
+      - created_at timestamp with time zone DEFAULT now()
+    Primary key:
+      - PRIMARY KEY (id)
+    Foreign keys:
+      - payment_audit_log_booking_id_fkey: FOREIGN KEY (booking_id) REFERENCES bookings(id) ON DELETE SET NULL
+      - payment_audit_log_payment_id_fkey: FOREIGN KEY (payment_id) REFERENCES payments(id) ON DELETE SET NULL
+    RLS policies:
+      - "Only admins can access payment audit log" USING (public.is_super_admin())
+
+### TABLE: payment_methods   [RLS: disabled]
+    Columns:
+      - id uuid DEFAULT extensions.uuid_generate_v4() NOT NULL
+      - name character varying(100) NOT NULL
+      - code character varying(50) NOT NULL
+      - icon_url text
+      - is_active boolean DEFAULT true
+      - created_at timestamp with time zone DEFAULT now()
+    Primary key:
+      - PRIMARY KEY (id)
+    Unique:
+      - payment_methods_code_key: UNIQUE (code)
+
+### TABLE: payments   [RLS: ENABLED]
+    Comment: Payment transactions with Razorpay integration and refund tracking
+    Columns:
+      - id uuid DEFAULT extensions.uuid_generate_v4() NOT NULL
+      - booking_id uuid NOT NULL
+      - payment_reference character varying(100)
+      - amount numeric(10,2) NOT NULL
+      - currency character varying(3) DEFAULT 'INR'::character varying
+      - payment_method_id uuid
+      - payment_gateway character varying(50)
+      - transaction_id character varying(255)
+      - status character varying(20) DEFAULT 'pending'::character varying
+      - paid_at timestamp with time zone
+      - created_at timestamp with time zone DEFAULT now()
+      - payment_gateway_order_id character varying(255)    -- Razorpay order ID (order_xxx)
+      - payment_gateway_payment_id character varying(255)    -- Razorpay payment ID (pay_xxx) - used for idempotency checks
+      - payment_method character varying(50)
+      - refund_amount numeric(10,2)
+      - refund_id character varying(255)
+      - refunded_at timestamp with time zone
+      - payment_details jsonb
+    Primary key:
+      - PRIMARY KEY (id)
+    Unique:
+      - payments_payment_reference_key: UNIQUE (payment_reference)
+    Foreign keys:
+      - payments_booking_id_fkey: FOREIGN KEY (booking_id) REFERENCES bookings(id) ON DELETE RESTRICT
+    Check constraints:
+      - CONSTRAINT payments_status_check CHECK (((status)::text = ANY ((ARRAY['pending'::character varying, 'processing'::character varying, 'success'::character varying, 'failed'::character varying, 'refunded'::character varying, 'partially_refunded'::character varying])::text[])))
+    RLS policies:
+      - "payments_admin_own_hotel" FOR SELECT USING (((EXISTS ( SELECT 1 FROM (public.bookings JOIN public.hotels ON ((hotels.id = bookings.hotel_id))) WHERE ((bookings.id = payments.booking_id) AND (hotels.owner_id = auth.uid())))) AND public.is_hotel_admin()))
+      - "payments_super_admin_all" FOR SELECT USING (public.is_super_admin())
+      - "payments_user_own" FOR SELECT USING ((EXISTS ( SELECT 1 FROM public.bookings WHERE ((bookings.id = payments.booking_id) AND (bookings.user_id = auth.uid())))))
+
+### TABLE: price_rules   [RLS: disabled]
+    Columns:
+      - id uuid DEFAULT extensions.uuid_generate_v4() NOT NULL
+      - room_type_id uuid NOT NULL
+      - valid_from date NOT NULL
+      - valid_to date NOT NULL
+      - price_per_night numeric(10,2) NOT NULL
+      - min_nights integer DEFAULT 1
+      - max_nights integer
+      - day_of_week integer
+      - is_active boolean DEFAULT true
+      - created_at timestamp with time zone DEFAULT now()
+      - updated_at timestamp with time zone DEFAULT now()
+      - label character varying(255)
+      - price_type character varying(20) DEFAULT 'custom'::character varying
+      - created_by uuid
+    Primary key:
+      - PRIMARY KEY (id)
+    Foreign keys:
+      - price_rules_room_type_id_fkey: FOREIGN KEY (room_type_id) REFERENCES room_types(id) ON DELETE CASCADE
+    Check constraints:
+      - CONSTRAINT price_rules_price_type_check CHECK (((price_type)::text = ANY ((ARRAY['weekend'::character varying, 'festival'::character varying, 'long_weekend'::character varying, 'custom'::character varying])::text[])))
+
+### TABLE: profiles   [RLS: ENABLED]
+    Columns:
+      - id uuid NOT NULL
+      - first_name character varying(100)
+      - last_name character varying(100)
+      - full_name character varying(200) GENERATED ALWAYS AS (
+CASE
+    WHEN ((first_name IS NOT NULL) AND (last_name IS NOT NULL)) THEN (((first_name)::text || ' '::text) || (last_name)::text)
+    WHEN (first_name IS NOT NULL) THEN (first_name)::text
+    WHEN (last_name IS NOT NULL) THEN (last_name)::text
+    ELSE NULL::text
+END) STORED
+      - phone character varying(20)
+      - date_of_birth date
+      - nationality character varying(3)
+      - profile_image text
+      - bio text
+      - preferences jsonb DEFAULT '{}'::jsonb
+      - created_at timestamp with time zone DEFAULT now()
+      - updated_at timestamp with time zone DEFAULT now()
+      - email text
+      - role text
+      - hotel_ids jsonb
+    Primary key:
+      - PRIMARY KEY (id)
+    Foreign keys:
+      - profiles_id_fkey: FOREIGN KEY (id) REFERENCES auth.users(id) ON DELETE CASCADE
+    RLS policies:
+      - "Users can insert own profile" FOR INSERT WITH CHECK ((auth.uid() = id))
+      - "Users can update own profile" FOR UPDATE USING ((auth.uid() = id))
+      - "Users can view own profile" FOR SELECT USING ((auth.uid() = id))
+      - "profiles_admin_update_all" FOR UPDATE USING (public.is_super_admin())
+      - "profiles_admin_view_all" FOR SELECT USING (public.is_super_admin())
+      - "profiles_update_own" FOR UPDATE USING ((auth.uid() = id)) WITH CHECK ((auth.uid() = id))
+      - "profiles_view_own" FOR SELECT USING ((auth.uid() = id))
+
+### TABLE: promotions   [RLS: disabled]
+    Columns:
+      - id uuid DEFAULT extensions.uuid_generate_v4() NOT NULL
+      - hotel_id uuid
+      - code character varying(50) NOT NULL
+      - description text
+      - discount_type character varying(20)
+      - discount_value numeric(10,2) NOT NULL
+      - min_booking_amount numeric(10,2)
+      - max_discount numeric(10,2)
+      - valid_from date
+      - valid_to date
+      - usage_limit integer
+      - used_count integer DEFAULT 0
+      - is_active boolean DEFAULT true
+      - created_at timestamp with time zone DEFAULT now()
+      - updated_at timestamp with time zone DEFAULT now()
+    Primary key:
+      - PRIMARY KEY (id)
+    Unique:
+      - promotions_code_key: UNIQUE (code)
+    Foreign keys:
+      - promotions_hotel_id_fkey: FOREIGN KEY (hotel_id) REFERENCES hotels(id) ON DELETE CASCADE
+    Check constraints:
+      - CONSTRAINT promotions_discount_type_check CHECK (((discount_type)::text = ANY ((ARRAY['percentage'::character varying, 'fixed'::character varying])::text[])))
+
+### TABLE: refund_transactions   [RLS: ENABLED]
+    Comment: Tracks all refund transactions with 48-hour cancellation policy enforcement
+    Columns:
+      - id uuid DEFAULT extensions.uuid_generate_v4() NOT NULL
+      - booking_id uuid NOT NULL
+      - payment_id uuid
+      - refund_gateway_id character varying(255)
+      - refund_amount numeric(10,2) NOT NULL
+      - cancellation_charge numeric(10,2) DEFAULT 0
+      - total_paid numeric(10,2) NOT NULL
+      - refund_reason text
+      - is_full_refund boolean DEFAULT true    -- TRUE for full refund (>48hrs), FALSE for partial/no refund (<48hrs)
+      - processed_by character varying(50)    -- Indicates who initiated the refund: customer, admin, or system
+      - status character varying(20) DEFAULT 'processing'::character varying
+      - error_message text
+      - created_at timestamp with time zone DEFAULT now()
+      - completed_at timestamp with time zone
+      - processed_by_user_id uuid
+      - notes text
+      - calculated_refund_amount numeric(10,2)
+      - amount_edited_by uuid
+      - amount_edit_reason text
+    Primary key:
+      - PRIMARY KEY (id)
+    Foreign keys:
+      - refund_transactions_booking_id_fkey: FOREIGN KEY (booking_id) REFERENCES bookings(id) ON DELETE CASCADE
+      - refund_transactions_payment_id_fkey: FOREIGN KEY (payment_id) REFERENCES payments(id) ON DELETE SET NULL
+    Check constraints:
+      - CONSTRAINT refund_transactions_processed_by_check CHECK (((processed_by)::text = ANY ((ARRAY['customer'::character varying, 'admin'::character varying, 'system'::character varying])::text[])))
+      - CONSTRAINT refund_transactions_status_check CHECK (((status)::text = ANY ((ARRAY['processing'::character varying, 'completed'::character varying, 'failed'::character varying, 'cancelled'::character varying])::text[])))
+    RLS policies:
+      - "Admins can view all refund transactions" USING (public.is_super_admin())
+      - "Users can view own refund transactions" FOR SELECT USING ((booking_id IN ( SELECT bookings.id FROM public.bookings WHERE (bookings.user_id = auth.uid()))))
+
+### TABLE: review_responses   [RLS: disabled]
+    Columns:
+      - id uuid DEFAULT extensions.uuid_generate_v4() NOT NULL
+      - review_id uuid NOT NULL
+      - hotel_id uuid NOT NULL
+      - response_text text NOT NULL
+      - responded_by uuid
+      - created_at timestamp with time zone DEFAULT now()
+    Primary key:
+      - PRIMARY KEY (id)
+    Unique:
+      - review_responses_review_id_key: UNIQUE (review_id)
+    Foreign keys:
+      - review_responses_hotel_id_fkey: FOREIGN KEY (hotel_id) REFERENCES hotels(id) ON DELETE CASCADE
+      - review_responses_review_id_fkey: FOREIGN KEY (review_id) REFERENCES reviews(id) ON DELETE CASCADE
+
+### TABLE: reviews   [RLS: disabled]
+    Columns:
+      - id uuid DEFAULT extensions.uuid_generate_v4() NOT NULL
+      - hotel_id uuid NOT NULL
+      - booking_id uuid NOT NULL
+      - user_id uuid NOT NULL
+      - reviewer_name character varying(255)
+      - reviewer_country character varying(100)
+      - reviewer_avatar_url text
+      - overall_rating numeric(3,1)
+      - staff_rating numeric(3,1)
+      - facilities_rating numeric(3,1)
+      - cleanliness_rating numeric(3,1)
+      - comfort_rating numeric(3,1)
+      - value_rating numeric(3,1)
+      - location_rating numeric(3,1)
+      - free_wifi_rating numeric(3,1)
+      - title character varying(255)
+      - comment text
+      - stayed_date date
+      - is_verified boolean DEFAULT false
+      - helpful_count integer DEFAULT 0
+      - status character varying(20) DEFAULT 'pending'::character varying
+      - created_at timestamp with time zone DEFAULT now()
+      - updated_at timestamp with time zone DEFAULT now()
+      - image_urls text[] DEFAULT '{}'::text[]
+    Primary key:
+      - PRIMARY KEY (id)
+    Unique:
+      - reviews_booking_id_key: UNIQUE (booking_id)
+    Foreign keys:
+      - reviews_hotel_id_fkey: FOREIGN KEY (hotel_id) REFERENCES hotels(id) ON DELETE CASCADE
+    Check constraints:
+      - CONSTRAINT reviews_cleanliness_rating_check CHECK (((cleanliness_rating >= (0)::numeric) AND (cleanliness_rating <= (10)::numeric)))
+      - CONSTRAINT reviews_comfort_rating_check CHECK (((comfort_rating >= (0)::numeric) AND (comfort_rating <= (10)::numeric)))
+      - CONSTRAINT reviews_facilities_rating_check CHECK (((facilities_rating >= (0)::numeric) AND (facilities_rating <= (10)::numeric)))
+      - CONSTRAINT reviews_free_wifi_rating_check CHECK (((free_wifi_rating >= (0)::numeric) AND (free_wifi_rating <= (10)::numeric)))
+      - CONSTRAINT reviews_location_rating_check CHECK (((location_rating >= (0)::numeric) AND (location_rating <= (10)::numeric)))
+      - CONSTRAINT reviews_overall_rating_check CHECK (((overall_rating >= (0)::numeric) AND (overall_rating <= (10)::numeric)))
+      - CONSTRAINT reviews_staff_rating_check CHECK (((staff_rating >= (0)::numeric) AND (staff_rating <= (10)::numeric)))
+      - CONSTRAINT reviews_status_check CHECK (((status)::text = ANY ((ARRAY['pending'::character varying, 'approved'::character varying, 'rejected'::character varying])::text[])))
+      - CONSTRAINT reviews_value_rating_check CHECK (((value_rating >= (0)::numeric) AND (value_rating <= (10)::numeric)))
+
+### TABLE: room_availability   [RLS: disabled]
+    Columns:
+      - id uuid DEFAULT extensions.uuid_generate_v4() NOT NULL
+      - room_id uuid NOT NULL
+      - date date NOT NULL
+      - status character varying(20) DEFAULT 'available'::character varying
+      - created_at timestamp with time zone DEFAULT now()
+    Primary key:
+      - PRIMARY KEY (id)
+    Unique:
+      - room_availability_room_id_date_key: UNIQUE (room_id, date)
+    Foreign keys:
+      - room_availability_room_id_fkey: FOREIGN KEY (room_id) REFERENCES rooms(id) ON DELETE CASCADE
+    Check constraints:
+      - CONSTRAINT room_availability_status_check CHECK (((status)::text = ANY ((ARRAY['available'::character varying, 'booked'::character varying, 'blocked'::character varying])::text[])))
+
+### TABLE: room_inventory_blocks   [RLS: disabled]
+    Columns:
+      - id uuid DEFAULT gen_random_uuid() NOT NULL
+      - hotel_id uuid NOT NULL
+      - room_type_id uuid NOT NULL
+      - start_date date NOT NULL
+      - end_date date NOT NULL
+      - rooms_blocked integer DEFAULT 1 NOT NULL
+      - reason text
+      - created_by uuid
+      - created_at timestamp with time zone DEFAULT now() NOT NULL
+      - updated_at timestamp with time zone DEFAULT now() NOT NULL
+    Primary key:
+      - PRIMARY KEY (id)
+    Foreign keys:
+      - room_inventory_blocks_created_by_fkey: FOREIGN KEY (created_by) REFERENCES auth.users(id)
+      - room_inventory_blocks_hotel_id_fkey: FOREIGN KEY (hotel_id) REFERENCES hotels(id) ON DELETE CASCADE
+      - room_inventory_blocks_room_type_id_fkey: FOREIGN KEY (room_type_id) REFERENCES room_types(id) ON DELETE CASCADE
+    Check constraints:
+      - CONSTRAINT room_inventory_blocks_rooms_blocked_check CHECK ((rooms_blocked > 0))
+      - CONSTRAINT valid_date_range CHECK ((end_date >= start_date))
+
+### TABLE: room_type_amenities   [RLS: ENABLED]
+    Columns:
+      - id uuid DEFAULT extensions.uuid_generate_v4() NOT NULL
+      - room_type_id uuid NOT NULL
+      - amenity_id uuid NOT NULL
+      - created_at timestamp with time zone DEFAULT now()
+    Primary key:
+      - PRIMARY KEY (id)
+    Unique:
+      - room_type_amenities_room_type_id_amenity_id_key: UNIQUE (room_type_id, amenity_id)
+    Foreign keys:
+      - room_type_amenities_amenity_id_fkey: FOREIGN KEY (amenity_id) REFERENCES amenities(id) ON DELETE CASCADE
+      - room_type_amenities_room_type_id_fkey: FOREIGN KEY (room_type_id) REFERENCES room_types(id) ON DELETE CASCADE
+    RLS policies:
+      - "room_type_amenities_admin_own" USING (((EXISTS ( SELECT 1 FROM (public.room_types JOIN public.hotels ON ((hotels.id = room_types.hotel_id))) WHERE ((room_types.id = room_type_amenities.room_type_id) AND (hotels.owner_id = auth.uid())))) AND public.is_hotel_admin())) WITH CHECK (((EXISTS ( SELECT 1 FROM (public.room_types JOIN public.hotels ON ((hotels.id = room_types.hotel_id))) WHERE ((room_types.id = room_type_amenities.room_type_id) AND (hotels.owner_id = auth.uid())))) AND public.is_hotel_admin()))
+      - "room_type_amenities_public_view" FOR SELECT USING ((EXISTS ( SELECT 1 FROM (public.room_types JOIN public.hotels ON ((hotels.id = room_types.hotel_id))) WHERE ((room_types.id = room_type_amenities.room_type_id) AND ((hotels.status) = 'active') AND ((room_types.status) = 'available')))))
+      - "room_type_amenities_super_admin_all" USING (public.is_super_admin())
+
+### TABLE: room_type_images   [RLS: ENABLED]
+    Columns:
+      - id uuid DEFAULT extensions.uuid_generate_v4() NOT NULL
+      - room_type_id uuid NOT NULL
+      - image_url text NOT NULL
+      - alt_text character varying(255)
+      - display_order integer DEFAULT 0
+      - created_at timestamp with time zone DEFAULT now()
+      - storage_path text    -- Path to the image file in Supabase Storage (e.g., room-type-id/filename.jpg)
+    Primary key:
+      - PRIMARY KEY (id)
+    Foreign keys:
+      - room_type_images_room_type_id_fkey: FOREIGN KEY (room_type_id) REFERENCES room_types(id) ON DELETE CASCADE
+    RLS policies:
+      - "room_type_images_admin_own" USING (((EXISTS ( SELECT 1 FROM (public.room_types JOIN public.hotels ON ((hotels.id = room_types.hotel_id))) WHERE ((room_types.id = room_type_images.room_type_id) AND (hotels.owner_id = auth.uid())))) AND public.is_hotel_admin())) WITH CHECK (((EXISTS ( SELECT 1 FROM (public.room_types JOIN public.hotels ON ((hotels.id = room_types.hotel_id))) WHERE ((room_types.id = room_type_images.room_type_id) AND (hotels.owner_id = auth.uid())))) AND public.is_hotel_admin()))
+      - "room_type_images_public_view" FOR SELECT USING ((EXISTS ( SELECT 1 FROM (public.room_types JOIN public.hotels ON ((hotels.id = room_types.hotel_id))) WHERE ((room_types.id = room_type_images.room_type_id) AND ((hotels.status) = 'active') AND ((room_types.status) = 'available')))))
+      - "room_type_images_super_admin_all" USING (public.is_super_admin())
+
+### TABLE: room_types   [RLS: ENABLED]
+    Columns:
+      - id uuid DEFAULT extensions.uuid_generate_v4() NOT NULL
+      - hotel_id uuid NOT NULL
+      - name character varying(255) NOT NULL
+      - description text
+      - size_sqm integer
+      - max_occupancy integer NOT NULL
+      - max_adults integer NOT NULL
+      - max_children integer DEFAULT 0
+      - standard_occupancy integer DEFAULT 2 NOT NULL
+      - extra_bed_price numeric(10,2) DEFAULT 0 NOT NULL
+      - bed_configuration character varying(255)
+      - base_price numeric(10,2) NOT NULL
+      - num_available_rooms integer DEFAULT 0
+      - free_cancellation_until date
+      - prepayment_required boolean DEFAULT false
+      - credit_card_required boolean DEFAULT true
+      - status character varying(20) DEFAULT 'available'::character varying
+      - created_at timestamp with time zone DEFAULT now()
+      - updated_at timestamp with time zone DEFAULT now()
+    Primary key:
+      - PRIMARY KEY (id)
+    Foreign keys:
+      - room_types_hotel_id_fkey: FOREIGN KEY (hotel_id) REFERENCES hotels(id) ON DELETE CASCADE
+    Check constraints:
+      - CONSTRAINT room_types_status_check CHECK (((status)::text = ANY ((ARRAY['available'::character varying, 'unavailable'::character varying])::text[])))
+    RLS policies:
+      - "room_types_admin_own" USING (((EXISTS ( SELECT 1 FROM public.hotels WHERE ((hotels.id = room_types.hotel_id) AND (hotels.owner_id = auth.uid())))) AND public.is_hotel_admin())) WITH CHECK (((EXISTS ( SELECT 1 FROM public.hotels WHERE ((hotels.id = room_types.hotel_id) AND (hotels.owner_id = auth.uid())))) AND public.is_hotel_admin()))
+      - "room_types_public_view" FOR SELECT USING ((((status) = 'available') AND (EXISTS ( SELECT 1 FROM public.hotels WHERE ((hotels.id = room_types.hotel_id) AND ((hotels.status) = 'active'))))))
+      - "room_types_super_admin_all" USING (public.is_super_admin())
+
+### TABLE: rooms   [RLS: ENABLED]
+    Columns:
+      - id uuid DEFAULT extensions.uuid_generate_v4() NOT NULL
+      - hotel_id uuid NOT NULL
+      - room_type_id uuid NOT NULL
+      - room_number character varying(20) NOT NULL
+      - floor integer
+      - status character varying(20) DEFAULT 'available'::character varying
+      - created_at timestamp with time zone DEFAULT now()
+      - updated_at timestamp with time zone DEFAULT now()
+    Primary key:
+      - PRIMARY KEY (id)
+    Unique:
+      - rooms_hotel_id_room_number_key: UNIQUE (hotel_id, room_number)
+    Foreign keys:
+      - rooms_hotel_id_fkey: FOREIGN KEY (hotel_id) REFERENCES hotels(id) ON DELETE CASCADE
+      - rooms_room_type_id_fkey: FOREIGN KEY (room_type_id) REFERENCES room_types(id) ON DELETE CASCADE
+    Check constraints:
+      - CONSTRAINT rooms_status_check CHECK (((status)::text = ANY ((ARRAY['available'::character varying, 'occupied'::character varying, 'maintenance'::character varying, 'cleaning'::character varying])::text[])))
+    RLS policies:
+      - "rooms_admin_own" USING (((EXISTS ( SELECT 1 FROM public.hotels WHERE ((hotels.id = rooms.hotel_id) AND (hotels.owner_id = auth.uid())))) AND public.is_hotel_admin())) WITH CHECK (((EXISTS ( SELECT 1 FROM public.hotels WHERE ((hotels.id = rooms.hotel_id) AND (hotels.owner_id = auth.uid())))) AND public.is_hotel_admin()))
+      - "rooms_public_view" FOR SELECT USING ((((status) = 'available') AND (EXISTS ( SELECT 1 FROM public.hotels WHERE ((hotels.id = rooms.hotel_id) AND ((hotels.status) = 'active'))))))
+      - "rooms_super_admin_all" USING (public.is_super_admin())
+
+### TABLE: special_offers   [RLS: disabled]
+    Columns:
+      - id uuid DEFAULT extensions.uuid_generate_v4() NOT NULL
+      - hotel_id uuid NOT NULL
+      - title character varying(255) NOT NULL
+      - description text
+      - badge_text character varying(100)
+      - badge_color character varying(20)
+      - valid_from date
+      - valid_to date
+      - is_active boolean DEFAULT true
+      - created_at timestamp with time zone DEFAULT now()
+    Primary key:
+      - PRIMARY KEY (id)
+    Foreign keys:
+      - special_offers_hotel_id_fkey: FOREIGN KEY (hotel_id) REFERENCES hotels(id) ON DELETE CASCADE
+
+### TABLE: taxes_and_fees   [RLS: disabled]
+    Columns:
+      - id uuid DEFAULT extensions.uuid_generate_v4() NOT NULL
+      - hotel_id uuid NOT NULL
+      - tax_name character varying(100) NOT NULL
+      - tax_type character varying(20)
+      - tax_value numeric(10,2) NOT NULL
+      - is_included_in_price boolean DEFAULT false
+      - valid_from date
+      - valid_to date
+      - is_active boolean DEFAULT true
+      - created_at timestamp with time zone DEFAULT now()
+    Primary key:
+      - PRIMARY KEY (id)
+    Foreign keys:
+      - taxes_and_fees_hotel_id_fkey: FOREIGN KEY (hotel_id) REFERENCES hotels(id) ON DELETE CASCADE
+    Check constraints:
+      - CONSTRAINT taxes_and_fees_tax_type_check CHECK (((tax_type)::text = ANY ((ARRAY['percentage'::character varying, 'fixed'::character varying])::text[])))
+
+### TABLE: trip_time_slots   [RLS: ENABLED]
+    Columns:
+      - id uuid DEFAULT gen_random_uuid() NOT NULL
+      - trip_type_id uuid NOT NULL
+      - start_time time without time zone NOT NULL
+      - end_time time without time zone NOT NULL
+      - label text
+      - is_active boolean DEFAULT true
+      - display_order integer DEFAULT 0
+      - created_at timestamp with time zone DEFAULT now()
+    Primary key:
+      - PRIMARY KEY (id)
+    Foreign keys:
+      - trip_time_slots_trip_type_id_fkey: FOREIGN KEY (trip_type_id) REFERENCES trip_types(id) ON DELETE CASCADE
+    RLS policies:
+      - "Admins can manage trip time slots" USING (((auth.jwt() ->> 'role') = ANY (ARRAY['super_admin', 'admin', 'hotel_admin'])))
+      - "Public can read trip time slots" FOR SELECT USING (true)
+
+### TABLE: trip_type_images   [RLS: ENABLED]
+    Columns:
+      - id uuid DEFAULT gen_random_uuid() NOT NULL
+      - trip_type_id uuid NOT NULL
+      - image_url text NOT NULL
+      - storage_path text
+      - alt_text text DEFAULT ''::text
+      - display_order integer DEFAULT 0
+      - created_at timestamp with time zone DEFAULT now()
+    Primary key:
+      - PRIMARY KEY (id)
+    Foreign keys:
+      - trip_type_images_trip_type_id_fkey: FOREIGN KEY (trip_type_id) REFERENCES trip_types(id) ON DELETE CASCADE
+    RLS policies:
+      - "Admins can manage trip type images" USING (((auth.jwt() ->> 'role') = ANY (ARRAY['super_admin', 'admin', 'hotel_admin'])))
+      - "Public can read trip type images" FOR SELECT USING (true)
+
+### TABLE: trip_types   [RLS: ENABLED]
+    Columns:
+      - id uuid DEFAULT gen_random_uuid() NOT NULL
+      - boat_id uuid NOT NULL
+      - name text NOT NULL
+      - description text
+      - duration_minutes integer DEFAULT 120 NOT NULL
+      - max_passengers integer DEFAULT 10 NOT NULL
+      - min_passengers integer DEFAULT 1 NOT NULL
+      - pricing_model text DEFAULT 'per_person'::text NOT NULL
+      - price_per_person numeric(10,2)
+      - price_per_boat numeric(10,2)
+      - child_price_per_person numeric(10,2)
+      - max_trips_per_day integer DEFAULT 3 NOT NULL
+      - includes_text text
+      - what_to_bring_text text
+      - free_cancellation_hours integer DEFAULT 24
+      - status text DEFAULT 'available'::text NOT NULL
+      - created_at timestamp with time zone DEFAULT now()
+      - updated_at timestamp with time zone DEFAULT now()
+    Primary key:
+      - PRIMARY KEY (id)
+    Foreign keys:
+      - trip_types_boat_id_fkey: FOREIGN KEY (boat_id) REFERENCES boats(id) ON DELETE CASCADE
+    Check constraints:
+      - CONSTRAINT trip_types_pricing_model_check CHECK ((pricing_model = ANY (ARRAY['per_person'::text, 'per_boat'::text])))
+      - CONSTRAINT trip_types_status_check CHECK ((status = ANY (ARRAY['available'::text, 'unavailable'::text, 'seasonal'::text])))
+    RLS policies:
+      - "Admins can manage trip types" USING (((auth.jwt() ->> 'role') = ANY (ARRAY['super_admin', 'admin', 'hotel_admin'])))
+      - "Public can read trip types" FOR SELECT USING (true)
+
+### TABLE: wishlists   [RLS: disabled]
+    Columns:
+      - id uuid DEFAULT extensions.uuid_generate_v4() NOT NULL
+      - user_id uuid NOT NULL
+      - hotel_id uuid NOT NULL
+      - created_at timestamp with time zone DEFAULT now()
+    Primary key:
+      - PRIMARY KEY (id)
+    Unique:
+      - wishlists_user_id_hotel_id_key: UNIQUE (user_id, hotel_id)
+    Foreign keys:
+      - wishlists_hotel_id_fkey: FOREIGN KEY (hotel_id) REFERENCES hotels(id) ON DELETE CASCADE
+    RLS policies:
+      - "Users can add to own wishlist" FOR INSERT WITH CHECK ((auth.uid() = user_id))
+      - "Users can remove from own wishlist" FOR DELETE USING ((auth.uid() = user_id))
+      - "Users can view own wishlist" FOR SELECT USING ((auth.uid() = user_id))
+
+====================================================================================================
+SECTION 2: VIEWS — 4
+====================================================================================================
+
+### VIEW: blogs_with_author
+    SELECT b.id,
+        b.title,
+        b.slug,
+        b.excerpt,
+        b.content,
+        b.featured_image,
+        b.author_id,
+        b.status,
+        b.published_at,
+        b.meta_title,
+        b.meta_description,
+        b.tags,
+        b.view_count,
+        b.created_at,
+        b.updated_at,
+        u.email AS author_email
+       FROM (blogs b
+         LEFT JOIN auth.users u ON ((b.author_id = u.id)))
+
+### VIEW: hotel_summary
+    SELECT h.id,
+        h.name,
+        h.slug,
+        h.city,
+        h.star_rating,
+        h.property_type,
+        h.location_rating,
+        count(DISTINCT r.id) AS review_count,
+        round(avg(r.overall_rating), 1) AS avg_overall_rating,
+        round(avg(r.staff_rating), 1) AS avg_staff_rating,
+        round(avg(r.facilities_rating), 1) AS avg_facilities_rating,
+        round(avg(r.cleanliness_rating), 1) AS avg_cleanliness_rating,
+        round(avg(r.comfort_rating), 1) AS avg_comfort_rating,
+        round(avg(r.value_rating), 1) AS avg_value_rating,
+        round(avg(r.location_rating), 1) AS avg_location_rating_review,
+        round(avg(r.free_wifi_rating), 1) AS avg_wifi_rating,
+        min(rt.base_price) AS starting_price
+       FROM ((hotels h
+         LEFT JOIN reviews r ON (((h.id = r.hotel_id) AND ((r.status)::text = 'approved'::text))))
+         LEFT JOIN room_types rt ON (((h.id = rt.hotel_id) AND ((rt.status)::text = 'available'::text))))
+      WHERE ((h.status)::text = 'active'::text)
+      GROUP BY h.id, h.name, h.slug, h.city, h.star_rating, h.property_type, h.location_rating
+
+### VIEW: payment_reconciliation
+    SELECT b.booking_reference,
+        b.total_amount AS booking_amount,
+        p.amount AS payment_amount,
+        p.status AS payment_status,
+        p.payment_gateway_payment_id,
+        COALESCE(r.refund_amount, (0)::numeric) AS refund_amount,
+        b.created_at AS booking_date,
+        p.created_at AS payment_date,
+        r.created_at AS refund_date
+       FROM ((bookings b
+         LEFT JOIN payments p ON ((p.booking_id = b.id)))
+         LEFT JOIN refund_transactions r ON ((r.booking_id = b.id)))
+      WHERE (p.id IS NOT NULL)
+      ORDER BY b.created_at DESC
+
+### VIEW: refund_summary
+    SELECT date(created_at) AS refund_date,
+        count(*) AS total_refunds,
+        sum(refund_amount) AS total_refund_amount,
+        sum(cancellation_charge) AS total_cancellation_charges,
+        count(*) FILTER (WHERE is_full_refund) AS full_refunds,
+        count(*) FILTER (WHERE (NOT is_full_refund)) AS partial_refunds,
+        count(*) FILTER (WHERE ((status)::text = 'completed'::text)) AS completed_refunds,
+        count(*) FILTER (WHERE ((status)::text = 'processing'::text)) AS pending_refunds,
+        count(*) FILTER (WHERE ((status)::text = 'failed'::text)) AS failed_refunds
+       FROM refund_transactions r
+      GROUP BY (date(created_at))
+      ORDER BY (date(created_at)) DESC
+
+====================================================================================================
+SECTION 3: FUNCTIONS — 11
+====================================================================================================
+  - calculate_booking_amounts() -> trigger
+  - generate_blog_slug(title text) -> text
+  - generate_booking_reference() -> text
+  - get_blogs_with_author() -> TABLE(id uuid, title character varying, slug character varying, excerpt text, content text, featured_image text, author_id uuid, status character varying, published_at timestamp with time zone, meta_title character varying, meta_description character varying, tags text[], view_count integer, created_at timestamp with time zone, updated_at timestamp with time zone, author_email text) SECURITY DEFINER
+  - handle_new_user() -> trigger SECURITY DEFINER
+  - handle_updated_at() -> trigger
+  - is_admin() -> boolean SECURITY DEFINER
+  - is_hotel_admin() -> boolean SECURITY DEFINER
+  - is_super_admin() -> boolean SECURITY DEFINER
+  - log_payment_event() -> trigger SECURITY DEFINER
+  - update_updated_at_column() -> trigger
+
+====================================================================================================
+SECTION 4: TRIGGERS — 13
+====================================================================================================
+  - bookings.calculate_booking_amounts_trigger: BEFORE INSERT OR UPDATE FOR EACH ROW -> calculate_booking_amounts()
+  - payments.payment_audit_trigger: AFTER INSERT OR UPDATE FOR EACH ROW -> log_payment_event()
+  - bookings.set_bookings_updated_at: BEFORE UPDATE FOR EACH ROW -> handle_updated_at()
+  - profiles.set_updated_at: BEFORE UPDATE FOR EACH ROW -> handle_updated_at()
+  - blogs.update_blogs_updated_at: BEFORE UPDATE FOR EACH ROW -> update_updated_at_column()
+  - child_policies.update_child_policies_updated_at: BEFORE UPDATE FOR EACH ROW -> update_updated_at_column()
+  - faqs.update_faqs_updated_at: BEFORE UPDATE FOR EACH ROW -> update_updated_at_column()
+  - hotels.update_hotels_updated_at: BEFORE UPDATE FOR EACH ROW -> update_updated_at_column()
+  - price_rules.update_price_rules_updated_at: BEFORE UPDATE FOR EACH ROW -> update_updated_at_column()
+  - promotions.update_promotions_updated_at: BEFORE UPDATE FOR EACH ROW -> update_updated_at_column()
+  - reviews.update_reviews_updated_at: BEFORE UPDATE FOR EACH ROW -> update_updated_at_column()
+  - room_types.update_room_types_updated_at: BEFORE UPDATE FOR EACH ROW -> update_updated_at_column()
+  - rooms.update_rooms_updated_at: BEFORE UPDATE FOR EACH ROW -> update_updated_at_column()
+
+====================================================================================================
+SECTION 5: RELATIONSHIP MAP (child.column -> parent.column)
+====================================================================================================
+  amenities.category_id -> amenity_categories.id ON DELETE SET NULL
+  blog_images.blog_id -> blogs.id ON DELETE CASCADE
+  blogs.author_id -> auth.users.id ON DELETE SET NULL
+  boat_amenities.amenity_id -> amenities.id
+  boat_amenities.boat_id -> boats.id ON DELETE CASCADE
+  boat_bookings.boat_id -> boats.id
+  boat_bookings.time_slot_id -> trip_time_slots.id
+  boat_bookings.trip_type_id -> trip_types.id
+  boat_bookings.user_id -> auth.users.id
+  boat_images.boat_id -> boats.id ON DELETE CASCADE
+  boat_reviews.boat_booking_id -> boat_bookings.id
+  boat_reviews.boat_id -> boats.id
+  boat_reviews.user_id -> auth.users.id
+  boats.owner_id -> auth.users.id
+  booking_meal_plans.booking_id -> bookings.id ON DELETE CASCADE
+  booking_meal_plans.meal_plan_id -> meal_plans.id
+  bookings.hotel_id -> hotels.id ON DELETE CASCADE
+  bookings.room_type_id -> room_types.id ON DELETE CASCADE
+  bookings.user_id -> auth.users.id ON DELETE SET NULL
+  cancellation_policies.hotel_id -> hotels.id ON DELETE CASCADE
+  cancellation_policies.room_type_id -> room_types.id ON DELETE CASCADE
+  child_policies.hotel_id -> hotels.id ON DELETE CASCADE
+  faqs.hotel_id -> hotels.id ON DELETE CASCADE
+  hotel_amenities.amenity_id -> amenities.id ON DELETE CASCADE
+  hotel_amenities.hotel_id -> hotels.id ON DELETE CASCADE
+  hotel_images.hotel_id -> hotels.id ON DELETE CASCADE
+  hotel_languages.hotel_id -> hotels.id ON DELETE CASCADE
+  hotel_languages.language_id -> languages.id ON DELETE CASCADE
+  hotel_nearby_attractions.attraction_id -> nearby_attractions.id ON DELETE CASCADE
+  hotel_nearby_attractions.hotel_id -> hotels.id ON DELETE CASCADE
+  hotel_payment_methods.hotel_id -> hotels.id ON DELETE CASCADE
+  hotel_payment_methods.payment_method_id -> payment_methods.id ON DELETE CASCADE
+  hotel_property_highlights.hotel_id -> hotels.id ON DELETE CASCADE
+  hotels.owner_id -> auth.users.id ON DELETE SET NULL
+  meal_plans.hotel_id -> hotels.id ON DELETE CASCADE
+  payment_anomalies.booking_id -> bookings.id ON DELETE SET NULL
+  payment_audit_log.booking_id -> bookings.id ON DELETE SET NULL
+  payment_audit_log.payment_id -> payments.id ON DELETE SET NULL
+  payments.booking_id -> bookings.id ON DELETE RESTRICT
+  price_rules.room_type_id -> room_types.id ON DELETE CASCADE
+  profiles.id -> auth.users.id ON DELETE CASCADE
+  promotions.hotel_id -> hotels.id ON DELETE CASCADE
+  refund_transactions.booking_id -> bookings.id ON DELETE CASCADE
+  refund_transactions.payment_id -> payments.id ON DELETE SET NULL
+  review_responses.hotel_id -> hotels.id ON DELETE CASCADE
+  review_responses.review_id -> reviews.id ON DELETE CASCADE
+  reviews.hotel_id -> hotels.id ON DELETE CASCADE
+  room_availability.room_id -> rooms.id ON DELETE CASCADE
+  room_inventory_blocks.created_by -> auth.users.id
+  room_inventory_blocks.hotel_id -> hotels.id ON DELETE CASCADE
+  room_inventory_blocks.room_type_id -> room_types.id ON DELETE CASCADE
+  room_type_amenities.amenity_id -> amenities.id ON DELETE CASCADE
+  room_type_amenities.room_type_id -> room_types.id ON DELETE CASCADE
+  room_type_images.room_type_id -> room_types.id ON DELETE CASCADE
+  room_types.hotel_id -> hotels.id ON DELETE CASCADE
+  rooms.hotel_id -> hotels.id ON DELETE CASCADE
+  rooms.room_type_id -> room_types.id ON DELETE CASCADE
+  special_offers.hotel_id -> hotels.id ON DELETE CASCADE
+  taxes_and_fees.hotel_id -> hotels.id ON DELETE CASCADE
+  trip_time_slots.trip_type_id -> trip_types.id ON DELETE CASCADE
+  trip_type_images.trip_type_id -> trip_types.id ON DELETE CASCADE
+  trip_types.boat_id -> boats.id ON DELETE CASCADE
+  wishlists.hotel_id -> hotels.id ON DELETE CASCADE
+
+====================================================================================================
+SECTION 6: STORAGE BUCKETS (Supabase Storage)
+====================================================================================================
+  Bucket         | Used for                 | Read   | Write
+  ---------------+--------------------------+--------+---------------------------------------------
+  hotel-images   | hotel_images             | public | insert/update/delete policies
+  room-images    | room_type_images         | public | insert/update/delete policies
+  boat-images    | boat_images              | public | insert/update/delete policies
+  trip-images    | trip_type_images         | public | insert/update/delete policies
+  blog-images    | blogs / blog_images      | public | authenticated users only
+  Path format: ${entityId}/${Date.now()}-${random}.${ext}  | Allowed: JPEG/PNG/WebP, max 5MB

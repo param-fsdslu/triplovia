@@ -1,0 +1,60 @@
+{
+  "HomePage": {
+    "title": "Bienvenue",
+    "getStarted": "Commencez par éditer",
+    "saveChanges": "Enregistrez et voyez vos modifications instantanément.",
+    "deployNow": "Déployer maintenant",
+    "readDocs": "Lire notre documentation",
+    "learn": "Apprendre",
+    "examples": "Exemples",
+    "goToNextJs": "Aller sur nextjs.org →"
+  },
+  "Auth": {
+    "signIn": "Se connecter à votre compte",
+    "signUp": "Créer un compte",
+    "signOut": "Se déconnecter",
+    "email": "Adresse e-mail",
+    "password": "Mot de passe",
+    "confirmPassword": "Confirmer le mot de passe",
+    "newPassword": "Nouveau mot de passe",
+    "forgotPassword": "Mot de passe oublié ?",
+    "resetPassword": "Réinitialiser le mot de passe",
+    "setNewPassword": "Définir un nouveau mot de passe",
+    "noAccount": "Vous n'avez pas de compte ?",
+    "haveAccount": "Vous avez déjà un compte ?",
+    "signingIn": "Connexion en cours...",
+    "creatingAccount": "Création du compte...",
+    "sendingResetLink": "Envoi du lien de réinitialisation...",
+    "sendResetLink": "Envoyer le lien de réinitialisation",
+    "updatingPassword": "Mise à jour du mot de passe...",
+    "updatePassword": "Mettre à jour le mot de passe",
+    "backToLogin": "Retour à la connexion",
+    "passwordMismatch": "Les mots de passe ne correspondent pas",
+    "checkEmail": "Vérifiez votre e-mail",
+    "confirmationSent": "Nous vous avons envoyé un lien de confirmation. Veuillez vérifier votre e-mail pour confirmer votre compte.",
+    "resetLinkSent": "Nous vous avons envoyé un lien de réinitialisation de mot de passe. Veuillez vérifier votre e-mail.",
+    "resetPasswordDescription": "Entrez votre adresse e-mail et nous vous enverrons un lien pour réinitialiser votre mot de passe.",
+    "createAccount": "Créez votre compte"
+  },
+  "Dashboard": {
+    "title": "Tableau de bord",
+    "welcome": "Bienvenue sur votre tableau de bord !",
+    "description": "Ceci est une page protégée. Seuls les utilisateurs authentifiés peuvent voir ce contenu.",
+    "userInfo": "Informations utilisateur",
+    "createdAt": "Créé le"
+  },
+  "Profile": {
+    "title": "Profil",
+    "dashboard": "Tableau de bord",
+    "userInformation": "Informations utilisateur",
+    "personalDetails": "Détails personnels et informations.",
+    "userId": "ID utilisateur",
+    "email": "Adresse e-mail",
+    "emailConfirmed": "E-mail confirmé",
+    "createdAt": "Créé le",
+    "lastSignIn": "Dernière connexion",
+    "yes": "Oui",
+    "no": "Non",
+    "never": "Jamais"
+  }
+}

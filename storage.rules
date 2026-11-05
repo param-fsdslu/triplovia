@@ -1,0 +1,21 @@
+rules_version = '2';
+
+// Image folders (the former Supabase buckets) are publicly readable by URL so <img> tags can
+// load them; listing folder contents is not allowed. Uploads only happen on the server
+// through the Admin SDK, which bypasses these rules.
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /{folder}/{allPaths=**} {
+      allow get: if folder in [
+        'hotel-images',
+        'room-images',
+        'boat-images',
+        'trip-images',
+        'blog-images',
+        'review-images',
+        'profile-images'
+      ];
+      allow write: if false;
+    }
+  }
+}

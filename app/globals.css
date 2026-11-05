@@ -1,0 +1,434 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * Page width for the public site: fluid and centred, content at most 1200px wide (like
+ * MakeMyTrip), with side gutters of 16px (phones) → 24px (tablets) → 32px (laptops) →
+ * 40px (desktops); wider screens get extra margin on both sides. Use it instead of
+ * `container`, whose width jumps at every breakpoint.
+ */
+@utility page-container {
+  width: 100%;
+  max-width: 80rem;
+  margin-inline: auto;
+  padding-inline: 1rem;
+  @media (width >= 40rem) {
+    padding-inline: 1.5rem;
+  }
+  @media (width >= 64rem) {
+    padding-inline: 2rem;
+  }
+  @media (width >= 80rem) {
+    padding-inline: 2.5rem;
+  }
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+
+  /* Typography: Inter for body/UI, Manrope for headings (loaded in the layouts via next/font) */
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-heading: var(--font-manrope), var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  /* Brand colors beyond the shadcn set */
+  --color-gold: var(--gold);
+  --color-mint: var(--mint);
+  --color-primary-hover: var(--primary-hover);
+
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+/* ---------------------------------------------------- */
+/*                    LIGHT THEME                      */
+/* ---------------------------------------------------- */
+
+/*
+  Brand palette → tokens
+    Brand Teal       #107F78  --primary            (bg-primary, text-primary)
+    Button Hover     #096861  --primary-hover      (hover:bg-primary-hover)
+    Deep Teal        #073F3D  --secondary          (bg-secondary)
+    Warm Ivory       #F8F6F0  --background
+    Champagne Gold   #D8AA68  --gold               (bg-gold, text-gold)
+    Dark Slate       #243A38  --foreground         (primary text)
+    Muted Gray       #647874  --muted-foreground   (secondary text)
+    White            #FFFFFF  --card / --popover
+    Soft Mint        #E8F3EF  --mint, --muted, --accent (light backgrounds; shadcn hover surfaces)
+    Border           #E2E9E5  --border / --input
+*/
+:root {
+  --radius: 0.625rem;
+
+  /* BASE */
+  --background: #F8F6F0;
+  --foreground: #243A38;
+
+  /* SURFACES */
+  --card: #FFFFFF;
+  --card-foreground: #243A38;
+
+  --popover: #FFFFFF;
+  --popover-foreground: #243A38;
+
+  /* BRAND COLORS */
+  --primary: #107F78;
+  --primary-foreground: #FFFFFF;
+  --primary-hover: #096861;
+
+  --secondary: #073F3D;
+  --secondary-foreground: #FFFFFF;
+
+  --gold: #D8AA68;
+  --mint: #E8F3EF;
+
+  /* shadcn uses accent for hover/focus surfaces (menus, calendar, ghost buttons) */
+  --accent: #E8F3EF;
+  --accent-foreground: #073F3D;
+
+  /* SUPPORT COLORS */
+  --muted: #E8F3EF;
+  --muted-foreground: #647874;
+
+  --border: #E2E9E5;
+  --input: #E2E9E5;
+  --ring: var(--primary);
+
+  --destructive: oklch(0.60 0.20 25);
+
+  /* CHART COLORS (brand-balanced) */
+  --chart-1: #107F78;
+  --chart-2: #D8AA68;
+  --chart-3: #073F3D;
+  --chart-4: #8DBDB3;
+  --chart-5: #647874;
+
+  /* SIDEBAR */
+  --sidebar: #FFFFFF;
+  --sidebar-foreground: #243A38;
+
+  --sidebar-primary: #107F78;
+  --sidebar-primary-foreground: #FFFFFF;
+
+  --sidebar-accent: #E8F3EF;
+  --sidebar-accent-foreground: #073F3D;
+
+  --sidebar-border: #E2E9E5;
+  --sidebar-ring: var(--primary);
+}
+
+/* ---------------------------------------------------- */
+/*                    DARK THEME                       */
+/* ---------------------------------------------------- */
+
+.dark {
+  --background: #0B1F1E;
+  --foreground: #F8F6F0;
+
+  --card: #102B29;
+  --card-foreground: #F8F6F0;
+
+  --popover: #102B29;
+  --popover-foreground: #F8F6F0;
+
+  --primary: #1A9E95;
+  --primary-foreground: #FFFFFF;
+  --primary-hover: #107F78;
+
+  --secondary: #073F3D;
+  --secondary-foreground: #F8F6F0;
+
+  --gold: #D8AA68;
+  --mint: #16403D;
+
+  --accent: #16403D;
+  --accent-foreground: #F8F6F0;
+
+  --muted: #16403D;
+  --muted-foreground: #A9BAB6;
+
+  --border: rgb(255 255 255 / 0.1);
+  --input: rgb(255 255 255 / 0.15);
+  --ring: #1A9E95;
+
+  --destructive: oklch(0.58 0.23 22);
+
+  --chart-1: #1A9E95;
+  --chart-2: #D8AA68;
+  --chart-3: #8DBDB3;
+  --chart-4: #647874;
+  --chart-5: #E8F3EF;
+
+  --sidebar: #102B29;
+  --sidebar-foreground: #F8F6F0;
+
+  --sidebar-primary: #1A9E95;
+  --sidebar-primary-foreground: #FFFFFF;
+
+  --sidebar-accent: #16403D;
+  --sidebar-accent-foreground: #F8F6F0;
+
+  --sidebar-border: rgb(255 255 255 / 0.1);
+  --sidebar-ring: var(--primary);
+}
+
+/* ---------------------------------------------------- */
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans;
+  }
+
+  /* Headings, titles and hotel names use Manrope */
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-family: var(--font-heading);
+  }
+}
+
+/* ---------------------------------------------------- */
+/*                 RICH TEXT EDITOR STYLES             */
+/* ---------------------------------------------------- */
+
+/* Custom prose styles for TipTap editor */
+.prose {
+  max-width: 65ch;
+}
+
+.prose h1 {
+  font-size: 2.25em;
+  font-weight: 800;
+  margin-top: 0;
+  margin-bottom: 0.8888889em;
+  line-height: 1.1111111;
+  color: var(--foreground);
+}
+
+.prose h2 {
+  font-size: 1.875em;
+  font-weight: 700;
+  margin-top: 1.5555556em;
+  margin-bottom: 0.8888889em;
+  line-height: 1.3333333;
+  color: var(--foreground);
+}
+
+.prose h3 {
+  font-size: 1.5em;
+  font-weight: 600;
+  margin-top: 1.6em;
+  margin-bottom: 0.6em;
+  line-height: 1.3333333;
+  color: var(--foreground);
+}
+
+.prose p {
+  margin-top: 1.25em;
+  margin-bottom: 1.25em;
+  line-height: 1.75;
+}
+
+.prose strong {
+  font-weight: 600;
+  color: var(--foreground);
+}
+
+.prose em {
+  font-style: italic;
+}
+
+.prose u {
+  text-decoration: underline;
+}
+
+.prose ul,
+.prose ol {
+  margin-top: 1.25em;
+  margin-bottom: 1.25em;
+  padding-left: 1.625em;
+}
+
+.prose ul {
+  list-style-type: disc;
+}
+
+.prose ol {
+  list-style-type: decimal;
+}
+
+.prose li {
+  margin-top: 0.5em;
+  margin-bottom: 0.5em;
+  padding-left: 0.375em;
+}
+
+.prose ul ul,
+.prose ul ol,
+.prose ol ul,
+.prose ol ol {
+  margin-top: 0.75em;
+  margin-bottom: 0.75em;
+}
+
+.prose blockquote {
+  font-weight: 500;
+  font-style: italic;
+  border-left-width: 0.25rem;
+  border-left-color: var(--border);
+  quotes: "\201C""\201D""\2018""\2019";
+  margin-top: 1.6em;
+  margin-bottom: 1.6em;
+  padding-left: 1em;
+  color: var(--muted-foreground);
+}
+
+.prose img {
+  margin-top: 2em;
+  margin-bottom: 2em;
+  border-radius: 0.5rem;
+}
+
+.prose a {
+  color: var(--primary);
+  text-decoration: underline;
+  font-weight: 500;
+}
+
+.prose a:hover {
+  color: var(--primary-hover);
+}
+
+/* Max width variations */
+.prose-sm {
+  font-size: 0.875rem;
+  line-height: 1.7142857;
+}
+
+.prose-lg {
+  font-size: 1.125rem;
+  line-height: 1.7777778;
+}
+
+.prose-xl {
+  font-size: 1.25rem;
+  line-height: 1.8;
+}
+
+/* Placeholder styles */
+.ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  color: var(--muted-foreground);
+  pointer-events: none;
+  height: 0;
+}
+
+/* ---------------------------------------------------- */
+/*                 UTILITY CLASSES                      */
+/* ---------------------------------------------------- */
+
+/* Scrollbar hide - used by carousels and horizontal scrolls */
+.scrollbar-hide,
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar,
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Scroll snap for carousels */
+.snap-x-mandatory {
+  scroll-snap-type: x mandatory;
+}
+.snap-start {
+  scroll-snap-align: start;
+}
+
+/* ------------------------------------------------------------------ */
+/*                        Hero entrance animation                       */
+/* ------------------------------------------------------------------ */
+
+@keyframes ht-hero-enter {
+  from {
+    opacity: 0;
+    transform: translateY(22px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [style*="ht-hero-enter"] {
+    animation: none !important;
+  }
+}
+/* ------------------------------------------------------------------ */
+/*              reCAPTCHA (SMS sign-in, components/auth)               */
+/* ------------------------------------------------------------------ */
+
+/* The floating badge lands clipped inside the login popup (fixed inside a transformed dialog);
+   AuthPanel shows Google's required "protected by reCAPTCHA" notice instead */
+.grecaptcha-badge {
+  visibility: hidden !important;
+}
+
+/* The picture challenge is appended to <body>, which an open Radix dialog makes
+   pointer-events: none — without this the challenge can't be clicked */
+body > div:has(iframe[src*="recaptcha"][src*="bframe"]) {
+  pointer-events: auto;
+}

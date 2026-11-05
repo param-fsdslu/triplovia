@@ -1,0 +1,60 @@
+{
+  "HomePage": {
+    "title": "Bienvenido",
+    "getStarted": "Comienza editando",
+    "saveChanges": "Guarda y ve tus cambios al instante.",
+    "deployNow": "Desplegar ahora",
+    "readDocs": "Lee nuestra documentación",
+    "learn": "Aprender",
+    "examples": "Ejemplos",
+    "goToNextJs": "Ir a nextjs.org →"
+  },
+  "Auth": {
+    "signIn": "Iniciar sesión en tu cuenta",
+    "signUp": "Crear una cuenta",
+    "signOut": "Cerrar sesión",
+    "email": "Correo electrónico",
+    "password": "Contraseña",
+    "confirmPassword": "Confirmar contraseña",
+    "newPassword": "Nueva contraseña",
+    "forgotPassword": "¿Olvidaste tu contraseña?",
+    "resetPassword": "Restablecer contraseña",
+    "setNewPassword": "Establecer nueva contraseña",
+    "noAccount": "¿No tienes una cuenta?",
+    "haveAccount": "¿Ya tienes una cuenta?",
+    "signingIn": "Iniciando sesión...",
+    "creatingAccount": "Creando cuenta...",
+    "sendingResetLink": "Enviando enlace de restablecimiento...",
+    "sendResetLink": "Enviar enlace de restablecimiento",
+    "updatingPassword": "Actualizando contraseña...",
+    "updatePassword": "Actualizar contraseña",
+    "backToLogin": "Volver al inicio de sesión",
+    "passwordMismatch": "Las contraseñas no coinciden",
+    "checkEmail": "Revisa tu correo electrónico",
+    "confirmationSent": "Te enviamos un enlace de confirmación. Por favor revisa tu correo electrónico para confirmar tu cuenta.",
+    "resetLinkSent": "Te enviamos un enlace para restablecer tu contraseña. Por favor revisa tu correo electrónico.",
+    "resetPasswordDescription": "Ingresa tu correo electrónico y te enviaremos un enlace para restablecer tu contraseña.",
+    "createAccount": "Crea tu cuenta"
+  },
+  "Dashboard": {
+    "title": "Panel de control",
+    "welcome": "¡Bienvenido a tu panel de control!",
+    "description": "Esta es una página protegida. Solo los usuarios autenticados pueden ver este contenido.",
+    "userInfo": "Información del usuario",
+    "createdAt": "Creado el"
+  },
+  "Profile": {
+    "title": "Perfil",
+    "dashboard": "Panel de control",
+    "userInformation": "Información del usuario",
+    "personalDetails": "Detalles personales e información.",
+    "userId": "ID de usuario",
+    "email": "Correo electrónico",
+    "emailConfirmed": "Correo confirmado",
+    "createdAt": "Creado el",
+    "lastSignIn": "Último inicio de sesión",
+    "yes": "Sí",
+    "no": "No",
+    "never": "Nunca"
+  }
+}

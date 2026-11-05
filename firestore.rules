@@ -1,0 +1,11 @@
+rules_version = '2';
+
+// All reads and writes go through the Next.js server with the Admin SDK, which enforces
+// access with lib/db/policies.ts. Browsers get no direct access to Firestore.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
